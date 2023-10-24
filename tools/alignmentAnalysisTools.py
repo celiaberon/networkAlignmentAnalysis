@@ -205,6 +205,4 @@ def getMaximumStrides(hInput, wInput, layer):
         max_strides.append(int((input + 2 * pad - dilation * (kernel - 1) - 1)
                                // stride + 1))
 
-    # hMax = int(np.floor((hInput + 2*layer.padding[0] - layer.dilation[0]*(layer.kernel_size[0] - 1) -1)/layer.stride[0] + 1))
-    # wMax = int(np.floor((wInput + 2*layer.padding[1] - layer.dilation[1]*(layer.kernel_size[1] - 1) -1)/layer.stride[1] + 1))
     return max_strides  # hMax, wMax
