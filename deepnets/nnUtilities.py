@@ -5,8 +5,9 @@ import time
 import torch
 import torch.nn as nn
 import torchvision
-# from torchvision import transforms
+from torchvision import transforms
 from tqdm import tqdm
+import data_prep as dp
 
 
 def trainNetwork(net, dataloader, lossFunction, optimizer, iterations, DEVICE,
@@ -274,7 +275,7 @@ def downloadMNIST(batchSize=1000, preprocess=None):
     return trainloader, testloader, numClasses
 
 
-def downloadImageNet(batchSize=1000):
+def downloadImageNet(batchSize=500):
 
     dataPath = getDataPath('ImageNet')
     valTransform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
@@ -286,11 +287,31 @@ def downloadImageNet(batchSize=1000):
     #     ])
     valData = torchvision.datasets.ImageNet(dataPath, split='val',
                                             transform=valTransform)
-    valLoader = torch.utils.data.DataLoader(valData, batch_size=500,
+    valLoader = torch.utils.data.DataLoader(valData, batch_size=batchSize,
                                             shuffle=True, num_workers=2,
                                             pin_memory=False)
     return valLoader
 
+
+def downloadImageNetTiny(batchSize=500):
+    
+    dataPath = getDataPath('imagenet-tiny')
+    tform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
+    
+    trainPath = os.path.join(dataPath, 'train')
+    testPath = os.path.join(dataPath, 'val', 'images')
+    dp.organize_imagenet_tiny(os.path.join(dataPath, 'val'))
+
+    trainset = torchvision.datasets.ImageFolder(trainPath, transform=tform)
+
+    testset = torchvision.datasets.ImageFolder(testPath, transform=tform)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batchSize,
+                                              shuffle=True, num_workers=0)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batchSize,
+                                             shuffle=True, num_workers=0)
+    numClasses = 200
+    return trainloader, testloader, numClasses
+    
 
 def getDataPath(dataset='MNIST', username=None):
 
@@ -302,11 +323,15 @@ def getDataPath(dataset='MNIST', username=None):
     elif 'celia' in username:
         root = os.path.join('/Users', username, 'Documents', 'machine_learning',
                             'datasets')
+    elif username == 'cberon':
+        root = '/n/home00/cberon/code/networkAlignmentAnalysis/deepnets'
     else:
         raise ValueError("New username needs path.")
 
     if dataset == 'MNIST':
         return root
+    elif dataset == 'imagenet-tiny':
+        return os.path.join(root, 'tiny-imagenet-200')
     elif dataset == 'ImageNet':
         return os.path.join(root, 'imagenet')
     else:
