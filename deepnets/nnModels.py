@@ -557,7 +557,8 @@ class AlexNet(nn.Module):
         return (self.do5.p, self.do6.p)
     
     def setDropout(self,pDropout):
-        if len(pDropout)==1: pDropout = (pDropout, pDropout)
+        if isinstance(pDropout, float) or isinstance(pDropout, int):
+            pDropout = (pDropout, pDropout)
         self.do5.p = pDropout[0]
         self.do6.p = pDropout[1]
         
