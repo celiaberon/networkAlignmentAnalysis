@@ -1,0 +1,20 @@
+Project:
+  project_name: test_alignment
+dataloader_params:
+  useNet: MLP4
+  dataset: ImageNet-Tiny
+  batchSize: 1000
+  weightvars: None
+training_params:
+  iterations: 10
+  learningRate: 3e-2
+  verbose: True
+  doInitWeights: False
+  pDropout: 0.5
+saving_params:
+  run_id: '0'
+  root: /Users/celiaberon/Desktop/
+plotting_params:
+  lb: 0.3
+  ub: 0.7
+
