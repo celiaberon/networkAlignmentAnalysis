@@ -15,6 +15,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 sys.path.append("../")
+sys.path.append('/n/home00/cberon/code/networkAlignmentAnalysis/')
 from deepnets import nnModels as models
 from deepnets import nnUtilities as nnutils
 
@@ -106,6 +107,7 @@ def run_training_loop(config_path):
     config = load_config(config_path)
 
     useNet = config['dataloader_params']['useNet']
+    dataset = config['dataloader_params']['dataset']
     batchSize = config['dataloader_params']['batchSize']
     pDropout = config['training_params']['pDropout']
     learningRate = config['training_params']['learningRate']
@@ -125,7 +127,7 @@ def run_training_loop(config_path):
     net.to(DEVICE)
 
     # Prepare Dataloaders
-    trainloader, testloader, _ = prepare_loaders(dataset='MNIST',
+    trainloader, testloader, _ = prepare_loaders(dataset=dataset,
                                                  batchSize=batchSize,
                                                  preprocess=preprocess,
                                                  loader_workers=2)
@@ -213,16 +215,8 @@ def run_training_loop(config_path):
 
 def plot_training_alignment(config_path, results=None):
 
-    if results is None:
-        results = run_training_loop(config_path)
-
     config = load_config(config_path)
 
-    net = results.get('net')
-    alignFull = results.get('alignFull')
-    alignFull_nodo = results.get('alignFull_nodo')
-    trainloader = results.get('trainloader')
-    totalEpochs = config['training_params']['iterations'] * len(trainloader)
     verbose = config['training_params']['verbose']
     root = config['saving_params']['root']
     run_id = config['saving_params']['run_id']
@@ -231,6 +225,14 @@ def plot_training_alignment(config_path, results=None):
 
     save_path = os.path.join(root, 'runs', run_id)
     os.makedirs(save_path) if not os.path.isdir(save_path) else None
+    if results is None:
+        results = run_training_loop(config_path)
+
+    net = results.get('net')
+    alignFull = results.get('alignFull')
+    alignFull_nodo = results.get('alignFull_nodo')
+    trainloader = results.get('trainloader')
+    totalEpochs = config['training_params']['iterations'] * len(trainloader)
 
     with open(os.path.join(save_path, 'config.yaml'), 'w') as yaml_file:
         yaml.dump(config, yaml_file, default_flow_style=False)
@@ -310,9 +312,10 @@ def plot_training_alignment(config_path, results=None):
     net.setDropout(storeDropout)
 
     if verbose:
-        print(len(activations)) # number of batches in trainLoader
-        print(len(activations[0])) # number of layers in network
-        print([a.shape for a in activations[0]]) # (batchSize x nodesPerLayer) for each layer
+        print('n batches = ', len(activations)) # number of batches in trainLoader
+        print('n layers = ', len(activations[0])) # number of layers in network
+        print('batchSize x nodesPerLayer) for each layer\n', 
+                [a.shape for a in activations[0]]) # (batchSize x nodesPerLayer) for each layer
 
     # Make list containing the input to each layer for every image. The first
     # element (allinputs[0]) is just the images. Every next element is the
@@ -368,4 +371,6 @@ def plot_training_alignment(config_path, results=None):
     fig.savefig(os.path.join(save_path, 'eigenvalues_vs_weights.png'),
                 bbox_inches='tight')
 
-
+config_path = sys.argv[1]
+# config_path = 'config.yaml'
+plot_training_alignment(config_path)

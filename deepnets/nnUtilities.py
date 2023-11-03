@@ -260,7 +260,7 @@ def measurePerformance(net, dataloader, DEVICE=None, verbose=False):
     return totalLoss / len(dataloader), 100 * numCorrect / numAttempted
 
 
-def downloadMNIST(batchSize=1000, preprocess=None):
+def downloadMNIST(batchSize=1000, preprocess=None, loader_workers=2):
 
     dataPath = getDataPath('MNIST')
     trainset = torchvision.datasets.MNIST(root=dataPath, train=True,
@@ -268,14 +268,14 @@ def downloadMNIST(batchSize=1000, preprocess=None):
     testset = torchvision.datasets.MNIST(root=dataPath, train=False,
                                          download=True, transform=preprocess)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batchSize,
-                                              shuffle=True, num_workers=2)
+                                              shuffle=True, num_workers=loader_workers)
     testloader = torch.utils.data.DataLoader(testset, batch_size=batchSize,
-                                             shuffle=True, num_workers=2)
+                                             shuffle=True, num_workers=loader_workers)
     numClasses = 10
     return trainloader, testloader, numClasses
 
 
-def downloadImageNet(batchSize=500):
+def downloadImageNet(batchSize=500, loader_workers=2, **kwargs):
 
     dataPath = getDataPath('ImageNet')
     valTransform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
@@ -288,12 +288,12 @@ def downloadImageNet(batchSize=500):
     valData = torchvision.datasets.ImageNet(dataPath, split='val',
                                             transform=valTransform)
     valLoader = torch.utils.data.DataLoader(valData, batch_size=batchSize,
-                                            shuffle=True, num_workers=2,
+                                            shuffle=True, num_workers=loader_workers,
                                             pin_memory=False)
     return valLoader
 
 
-def downloadImageNetTiny(batchSize=500):
+def downloadImageNetTiny(batchSize=500, loader_workers=2, **kwargs):
     
     dataPath = getDataPath('imagenet-tiny')
     tform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
@@ -306,9 +306,9 @@ def downloadImageNetTiny(batchSize=500):
 
     testset = torchvision.datasets.ImageFolder(testPath, transform=tform)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batchSize,
-                                              shuffle=True, num_workers=0)
+                                              shuffle=True, num_workers=loader_workers)
     testloader = torch.utils.data.DataLoader(testset, batch_size=batchSize,
-                                             shuffle=True, num_workers=0)
+                                             shuffle=True, num_workers=loader_workers)
     numClasses = 200
     return trainloader, testloader, numClasses
     

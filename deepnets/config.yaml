@@ -13,7 +13,7 @@ training_params:
   pDropout: 0.5
 saving_params:
   run_id: '0'
-  root: /Users/celiaberon/Desktop/
+  root: /n/home00/cberon/model_output/
 plotting_params:
   lb: 0.3
   ub: 0.7
