@@ -3,7 +3,7 @@ Project:
 dataloader_params:
   useNet: MLP4
   dataset: ImageNet-Tiny
-  batchSize: 1000
+  batch_size: 1000
   weightvars: None
 training_params:
   iterations: 10
