@@ -2,12 +2,12 @@ import getpass
 import os
 import time
 
+import data_prep as dp
 import torch
 import torch.nn as nn
 import torchvision
 from torchvision import transforms
 from tqdm import tqdm
-import data_prep as dp
 
 
 def trainNetwork(net, dataloader, lossFunction, optimizer, iterations, DEVICE,
@@ -236,7 +236,8 @@ def measurePerformance(net, dataloader, DEVICE=None, verbose=False):
     '''
     Measure performance on test set.
     '''
-    if DEVICE is None: DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    if DEVICE is None:
+        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Measure performance
     loss_function = nn.CrossEntropyLoss()
@@ -244,8 +245,7 @@ def measurePerformance(net, dataloader, DEVICE=None, verbose=False):
     numCorrect = 0
     numAttempted = 0
 
-    if verbose: iterator = tqdm(dataloader)
-    else: iterator = dataloader
+    iterator = tqdm(dataloader) if verbose else dataloader
 
     for batch in iterator:
         images, label = batch
@@ -260,58 +260,77 @@ def measurePerformance(net, dataloader, DEVICE=None, verbose=False):
     return totalLoss / len(dataloader), 100 * numCorrect / numAttempted
 
 
-def downloadMNIST(batchSize=1000, preprocess=None, loader_workers=2):
+def downloadMNIST(batch_size=1000, preprocess=None, n_workers=2):
 
-    dataPath = getDataPath('MNIST')
-    trainset = torchvision.datasets.MNIST(root=dataPath, train=True,
+    data_path = getDataPath('MNIST')
+    train_set = torchvision.datasets.MNIST(root=data_path, train=True,
+                                           download=True, transform=preprocess)
+    test_set = torchvision.datasets.MNIST(root=data_path, train=False,
                                           download=True, transform=preprocess)
-    testset = torchvision.datasets.MNIST(root=dataPath, train=False,
-                                         download=True, transform=preprocess)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batchSize,
-                                              shuffle=True, num_workers=loader_workers)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=batchSize,
-                                             shuffle=True, num_workers=loader_workers)
-    numClasses = 10
-    return trainloader, testloader, numClasses
+    print(dir(train_set))
+    train_loader = torch.utils.data.DataLoader(train_set,
+                                               batch_size=batch_size,
+                                               shuffle=True,
+                                               num_workers=n_workers)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
+                                              shuffle=True,
+                                              num_workers=n_workers)
+    n_classes = 10
+    return train_loader, test_loader, n_classes
 
 
-def downloadImageNet(batchSize=500, loader_workers=2, **kwargs):
+def downloadImageNet(batch_size=500, n_workers=2, **kwargs):
 
-    dataPath = getDataPath('ImageNet')
-    valTransform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
+    from nnUtilities import ImageNetKaggle
+
+    data_path = getDataPath('ImageNet')
+    val_transform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
     # valTransform = transforms.Compose([
     #     transforms.Resize(256,interpolation=torchvision.transforms.InterpolationMode.BILINEAR),
     #         transforms.CenterCrop(224),
     #         transforms.ToTensor(),
     #         transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225]),
     #     ])
-    valData = torchvision.datasets.ImageNet(dataPath, split='val',
-                                            transform=valTransform)
-    valLoader = torch.utils.data.DataLoader(valData, batch_size=batchSize,
-                                            shuffle=True, num_workers=loader_workers,
-                                            pin_memory=False)
-    return valLoader
+    train_set = ImageNetKaggle(data_path, split='train',
+                               transform=val_transform)
+    train_loader = torch.utils.data.DataLoader(train_set,
+                                               batch_size=batch_size,
+                                               shuffle=True,
+                                               num_workers=n_workers,
+                                               pin_memory=False)
+
+    val_set = ImageNetKaggle(data_path, split='val',
+                             transform=val_transform)
+    val_loader = torch.utils.data.DataLoader(val_set,
+                                             batch_size=batch_size,
+                                             shuffle=True,
+                                             num_workers=n_workers,
+                                             pin_memory=False)
+    n_classes = 1000
+    return train_loader, val_loader, n_classes
 
 
-def downloadImageNetTiny(batchSize=500, loader_workers=2, **kwargs):
-    
-    dataPath = getDataPath('imagenet-tiny')
+def downloadImageNetTiny(batch_size=500, n_workers=2, **kwargs):
+
+    data_path = getDataPath('imagenet-tiny')
     tform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
-    
-    trainPath = os.path.join(dataPath, 'train')
-    testPath = os.path.join(dataPath, 'val', 'images')
-    dp.organize_imagenet_tiny(os.path.join(dataPath, 'val'))
 
-    trainset = torchvision.datasets.ImageFolder(trainPath, transform=tform)
+    train_path = os.path.join(data_path, 'train')
+    test_path = os.path.join(data_path, 'val', 'images')
+    dp.organize_imagenet_tiny(os.path.join(data_path, 'val'))
 
-    testset = torchvision.datasets.ImageFolder(testPath, transform=tform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batchSize,
-                                              shuffle=True, num_workers=loader_workers)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=batchSize,
-                                             shuffle=True, num_workers=loader_workers)
-    numClasses = 200
-    return trainloader, testloader, numClasses
-    
+    train_set = torchvision.datasets.ImageFolder(train_path, transform=tform)
+
+    test_set = torchvision.datasets.ImageFolder(test_path, transform=tform)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                               shuffle=True,
+                                               num_workers=n_workers)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
+                                              shuffle=True,
+                                              num_workers=n_workers)
+    n_classes = 200
+    return train_loader, test_loader, n_classes
+
 
 def getDataPath(dataset='MNIST', username=None):
 
