@@ -126,6 +126,7 @@ def run_training_loop(config_path):
     if verbose:
         print(f'Initialized {useNet} on {DEVICE}')
 
+    t = time.time()
     # Prepare Dataloaders
     train_loader, test_loader, _ = prepare_loaders(dataset=dataset,
                                                    batchSize=batch_size,
@@ -146,6 +147,7 @@ def run_training_loop(config_path):
     deltaWeights = []
 
     if verbose:
+        print(f'DataLoaders prepared in {(time.time() - t):.3f} seconds.')
         print(f'DataLoaders ready with {n_batches=} for {n_train_steps=}')
 
     # Store initial network weights to view how things change over training
@@ -155,6 +157,7 @@ def run_training_loop(config_path):
     t = time.time()
     for epoch in range(iterations):
 
+        print(f'Starting {epoch=}')
         for idx, (images, labels) in enumerate(train_loader):
             cidx = epoch * n_batches + idx  # stores idx of each "miniepoch"
 
@@ -193,6 +196,7 @@ def run_training_loop(config_path):
         if verbose:   # print statistics for each epoch
             print(f'Loss in epoch {epoch:3d}: {loss.item():.3f}, Accuracy: '
                   f'{track_accuracy[cidx]:.2f}%')
+            print(f'Epoch ran in {(time.time() - t):.3f} seconds.')
 
     # Measure performance on test set
     eval_test_performance(test_loader, trained_net=net,
