@@ -49,6 +49,7 @@ def initialize_model(model_name='MLP4', actFunc=F.relu, pDropout=0):
     elif model_name == 'AlexNet':
         # Initialize AlexNet with no pretrained weights.
         net = models.AlexNet(weights=None, pDropout=pDropout)
+        preprocess = None
     else:
         raise ValueError('useNet not recognized')
 
