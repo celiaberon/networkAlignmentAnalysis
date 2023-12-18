@@ -281,7 +281,7 @@ def downloadMNIST(batch_size=1000, preprocess=None, n_workers=2):
 
 def downloadImageNet(batch_size=500, n_workers=2, **kwargs):
 
-    from nnUtilities import ImageNetKaggle
+    from data_prep import ImageNetKaggle
 
     data_path = getDataPath('ImageNet')
     val_transform = torchvision.models.AlexNet_Weights.IMAGENET1K_V1.transforms()
