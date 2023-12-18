@@ -352,6 +352,6 @@ def getDataPath(dataset='MNIST', username=None):
     elif dataset == 'imagenet-tiny':
         return os.path.join(root, 'tiny-imagenet-200')
     elif dataset == 'ImageNet':
-        return os.path.join(root, 'imagenet')
+        return '/n/holyscratch01/bsabatini_lab/Lab/ImageNet/'
     else:
         raise ValueError("Didn't recognize dataset string.")
