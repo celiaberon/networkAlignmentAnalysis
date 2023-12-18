@@ -706,13 +706,22 @@ class AlexNet(nn.Module):
 
     def forward(self, x):
         self.h0 = F.relu(self.conv0(x))
+        print(self.h0.shape)
         self.h1 = F.relu(self.conv1(self.maxPool1(self.h0)))
+        print(self.h1.shape)
         self.h2 = F.relu(self.conv2(self.maxPool2(self.h1)))
+        print(self.h2.shape)
         self.h3 = F.relu(self.conv3(self.h2))
+        print(self.h3.shape)
         self.h4 = F.relu(self.conv4(self.h3))
+        print(self.h4.shape)
         self.h5 = F.relu(self.fc5(torch.flatten(self.do5(self.avgpool5(self.maxPool5(self.h4))), 1)))
+        print(self.h5.shape)
         self.h6 = F.relu(self.fc6(self.do6(self.h5)))
+        print(self.h6.shape)
         self.out = self.fc7(self.h6)
+        print(self.out.shape)
+
         return self.out
 
     def getDropout(self):

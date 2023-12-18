@@ -64,7 +64,6 @@ def prepare_loaders(dataset, **kwargs):
         train_loader, test_loader, n_classes = nnutils.downloadImageNetTiny(**kwargs)
     elif dataset == 'ImageNet':
         train_loader, test_loader, n_classes = nnutils.downloadImageNet(**kwargs)
-        raise NotImplementedError
 
     return train_loader, test_loader, n_classes
 
@@ -124,6 +123,8 @@ def run_training_loop(config_path):
                                        actFunc=F.relu,
                                        pDropout=pDropout)
     net.to(DEVICE)
+    if verbose:
+        print(f'Initialized {useNet} on {DEVICE}')
 
     # Prepare Dataloaders
     train_loader, test_loader, _ = prepare_loaders(dataset=dataset,
@@ -143,6 +144,9 @@ def run_training_loop(config_path):
     alignFull = []
     alignFull_nodo = []
     deltaWeights = []
+
+    if verbose:
+        print(f'DataLoaders ready with {n_batches=} for {n_train_steps=}')
 
     # Store initial network weights to view how things change over training
     initWeights = net.getNetworkWeights()
