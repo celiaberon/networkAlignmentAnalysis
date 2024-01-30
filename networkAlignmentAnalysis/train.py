@@ -215,8 +215,12 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     # input argument check
     if not(isinstance(nets, list)): nets = [nets]
 
+    _, dropout_layers = nets[0].get_alignment_layers(include_pos=True)
+    last_layer_pos = len(nets[0].layers) - 1
+    dropout_layers = [layer for layer in dropout_layers if layer != last_layer_pos]
+    dropout_layers
     # number layers that dropout can be performed in
-    num_dropout_layers = nets[0].num_layers() - 1 # (never dropout classification layer)
+    num_dropout_layers = len(dropout_layers) # (never dropout classification layer)
 
     # put networks in evaluation mode
     in_training_mode = [net.training for net in nets]
@@ -268,7 +272,7 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
                     drop_layer = [layer]
                 else:
                     drop_high, drop_low, drop_rand = idx_high, idx_low, idx_rand
-                    drop_layer = [layer for layer in range(num_dropout_layers)]
+                    drop_layer = [layer for layer in dropout_layers]
                 
                 # get output with targeted dropout
                 out_high = [net.forward_targeted_dropout(images, [drop[idx, :] for drop in drop_high], drop_layer)[0]
