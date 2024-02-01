@@ -68,13 +68,8 @@ class AlignmentStatistics(Experiment):
         do supplementary analyses
         """
 
-        if self.args.use_wandb:
-            wandb.login()
-            run = wandb.init(
-                project='alignment_stats',
-                name='',
-                config=self.args
-            )
+        run = self.configure_wandb()
+
         # load networks 
         nets, optimizers = self.load_networks()
 
@@ -118,6 +113,18 @@ class AlignmentStatistics(Experiment):
         # return results and trained networks
         return results, nets
 
+    def configure_wandb(self):
+        if self.args.use_wandb:
+            wandb.login()
+            run = wandb.init(
+                project='alignment_stats',
+                name='',
+                config=self.args
+            )
+        if str(self.basepath).startswith('/n/home00/cberon'):
+            os.environ['WANDB_MODE'] = 'offline'
+
+        return run
 
     def plot(self, results):
         """
