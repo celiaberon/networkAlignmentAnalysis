@@ -6,6 +6,8 @@ import torch
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
+import wandb
+
 from .. import train
 from ..datasets import get_dataset
 from ..models.registry import get_model
@@ -52,6 +54,7 @@ class AlignmentStatistics(Experiment):
         # checkpointing parameters
         parser.add_argument('--use_prev', default=False, action='store_true', help='if used, will pick up training off previous checkpoint')
         parser.add_argument('--save_ckpts', default=False, action='store_true', help='if used, will save checkpoints of models')
+        parser.add_argument('--use_wandb', default=False, action='store_true', help='if used, will log experiment to WandB')
 
         # return parser
         return parser
@@ -64,6 +67,14 @@ class AlignmentStatistics(Experiment):
         train and test networks
         do supplementary analyses
         """
+
+        if self.args.use_wandb:
+            wandb.login()
+            run = wandb.init(
+                project='alignment_stats',
+                name='',
+                config=self.args
+            )
         # load networks 
         nets, optimizers = self.load_networks()
 
@@ -74,7 +85,7 @@ class AlignmentStatistics(Experiment):
                               device=self.args.device)
 
         # train networks
-        train_results, test_results = self.train_networks(nets, optimizers, dataset)
+        train_results, test_results = self.train_networks(nets, optimizers, dataset, run)
 
         # do targeted dropout experiment
         print('performing targeted dropout...')
@@ -145,7 +156,7 @@ class AlignmentStatistics(Experiment):
         return nets, optimizers
 
 
-    def train_networks(self, nets, optimizers, dataset):
+    def train_networks(self, nets, optimizers, dataset, run=None):
         """train and test networks"""
         # do training loop
         parameters = dict(
@@ -155,6 +166,7 @@ class AlignmentStatistics(Experiment):
             delta_weights=True,
             average_correlation=True,
             full_correlation=False,
+            run=run
         )
 
         if self.args.use_prev & os.path.isfile(self.get_checkpoint_path()):
