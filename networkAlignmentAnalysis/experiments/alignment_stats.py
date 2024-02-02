@@ -3,8 +3,9 @@ import torch
 import wandb
 
 from ..models.registry import get_model
-from .experiment import Experiment
 from . import arglib
+from .experiment import Experiment
+
 
 class AlignmentStatistics(Experiment):
     def get_basename(self):
@@ -22,20 +23,9 @@ class AlignmentStatistics(Experiment):
         parser = arglib.add_dropout_experiment_details(parser)
         parser = arglib.add_network_metaparameters(parser)
         parser = arglib.add_alignment_analysis_parameters(parser)
-        return parser
-    
-    def configure_wandb(self):
-        if self.args.use_wandb:
-            wandb.login()
-            run = wandb.init(
-                project='alignment_stats',
-                name='',
-                config=self.args
-            )
-        if str(self.basepath).startswith('/n/home00/cberon'):
-            os.environ['WANDB_MODE'] = 'offline'
+        parser.add_argument('--use_wandb', default=False, action='store_true', help='if used, will log experiment to WandB')
 
-        return run
+        return parser
 
     def load_networks(self):
         """
@@ -88,8 +78,8 @@ class AlignmentStatistics(Experiment):
         # load dataset
         dataset = self.prepare_dataset(nets[0])
 	
-	# initialize wandb logging
-        run = self.configure_wandb()
+	    # initialize wandb logging
+        run = self.prepare_wandb()
 
         # train networks
         train_results, test_results = self.train_networks(nets, optimizers, dataset)
