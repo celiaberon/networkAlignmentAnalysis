@@ -1,5 +1,7 @@
 import torch
 
+import wandb
+
 from ..models.registry import get_model
 from .experiment import Experiment
 from . import arglib
@@ -22,6 +24,19 @@ class AlignmentStatistics(Experiment):
         parser = arglib.add_alignment_analysis_parameters(parser)
         return parser
     
+    def configure_wandb(self):
+        if self.args.use_wandb:
+            wandb.login()
+            run = wandb.init(
+                project='alignment_stats',
+                name='',
+                config=self.args
+            )
+        if str(self.basepath).startswith('/n/home00/cberon'):
+            os.environ['WANDB_MODE'] = 'offline'
+
+        return run
+
     def load_networks(self):
         """
         method for loading networks
@@ -72,6 +87,9 @@ class AlignmentStatistics(Experiment):
 
         # load dataset
         dataset = self.prepare_dataset(nets[0])
+	
+	# initialize wandb logging
+        run = self.configure_wandb()
 
         # train networks
         train_results, test_results = self.train_networks(nets, optimizers, dataset)
@@ -110,4 +128,4 @@ class AlignmentStatistics(Experiment):
         self.plot_dropout_results(results['evec_dropout_results'], results['evec_dropout_parameters'], results['prms'], dropout_type='eigenvectors')
 
 
-    
+

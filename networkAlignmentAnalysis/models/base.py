@@ -1,11 +1,13 @@
+from abc import ABC, abstractmethod
 from math import prod
-from tqdm import tqdm
-from abc import ABC, abstractmethod 
-import torch
-from torch import nn
-
 from warnings import warn
 
+import torch
+from torch import nn
+from tqdm import tqdm
+
+from ..utils import (batch_cov, check_iterable, get_device,
+                     get_maximum_strides, named_transpose, weighted_average)
 from .layers import LAYER_REGISTRY, REGISTRY_REQUIREMENTS, check_metaparameters
 from ..utils import check_iterable
 from ..utils import get_maximum_strides
@@ -233,7 +235,8 @@ class AlignmentNetwork(nn.Module, ABC):
     def get_alignment_layers(self, idx=None):
         """convenience method for retrieving registered layers for alignment measurements throughout the network"""
         layers = []
-        for layer, metaprms in zip(self.layers, self.metaparameters):
+        pos = []
+        for i, (layer, metaprms) in enumerate(zip(self.layers, self.metaparameters)):
             if self._include_layer(metaprms):
                 layers.append(metaprms['layer_handle'](layer))
         if idx is None:

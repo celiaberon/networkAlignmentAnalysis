@@ -8,7 +8,7 @@ from networkAlignmentAnalysis.utils import (transpose_list,
                                             test_nets,
                                             train_nets,
                                             save_checkpoint)
-
+import wandb
 
 @train_nets
 def train(nets, optimizers, dataset, **parameters):
@@ -24,6 +24,9 @@ def train(nets, optimizers, dataset, **parameters):
     use_train = parameters.get('train_set', True)
     dataloader = dataset.train_loader if use_train else dataset.test_loader
     num_steps = len(dataset.train_loader)*parameters['num_epochs']
+
+    # --- optional W&B logging ---
+    run = parameters.get('run')
 
     # --- optional analyses ---
     measure_alignment = parameters.get('alignment', True)
@@ -91,6 +94,11 @@ def train(nets, optimizers, dataset, **parameters):
                 results['delta_weights'].append([net.compare_weights(init_weight)
                                                  for net, init_weight in zip(nets, results['init_weights'])])
             
+            if run is not None:
+                run.log({f'losses/loss-{ii}': l.item() for ii, l in enumerate(loss)}
+                          | {f'accuracies/accuracy-{ii}': dataset.measure_accuracy(output, labels) for ii, output in enumerate(outputs)}
+                        #   | {f'alignments/alignment-{ii}': alignment for ii, alignment in enumerate(results['alignment'][-1])}
+                          | {'batch': cidx})
         if save_ckpt & (epoch % freq_ckpt == 0):
             save_checkpoint(nets,
                             optimizers,
@@ -98,7 +106,7 @@ def train(nets, optimizers, dataset, **parameters):
                                        'epoch': epoch,
                                        'device': dev},
                             path_ckpt)
-
+            
     # condense optional analyses
     for k in ['alignment', 'delta_weights', 'avgcorr', 'fullcorr']:
         if k not in results.keys(): continue
@@ -111,6 +119,9 @@ def train(nets, optimizers, dataset, **parameters):
 @test_nets
 def test(nets, dataset, **parameters):
     """method for testing network on supervised learning problem"""
+
+    # --- optional W&B logging ---
+    run = parameters.get('run')
 
     # input argument checks
     if not(isinstance(nets, list)): nets = [nets]
@@ -160,6 +171,9 @@ def test(nets, dataset, **parameters):
 
     if measure_alignment:
         results['alignment'] = condense_values(transpose_list(alignment))
+    if run is not None:
+        run.summary['test_loss'] = torch.mean(torch.tensor(results['loss']))
+        run.summary['test_accuracy'] = torch.mean(torch.tensor(results['accuracy']))
 
     return results
 
