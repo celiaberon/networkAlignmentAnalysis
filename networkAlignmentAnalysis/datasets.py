@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torchvision
 from torch import nn
-from torchvision import transforms
+from torchvision.transforms import v2 as transforms
 
 from . import files
 from .models.base import AlignmentNetwork
@@ -24,7 +24,6 @@ def default_loader_parameters(batch_size=1024, num_workers=2, shuffle=True, pin_
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,
     )
-
     return default_parameters
 
 class DataSet(ABC):
@@ -158,7 +157,8 @@ class MNIST(DataSet):
         # default transforms
         use_transforms = [
             # Convert PIL Image to PyTorch Tensor
-            transforms.ToTensor(), 
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True),
             # Normalize inputs to canonical distribution
             transforms.Normalize((self.dist_params['mean'],), (self.dist_params['std'],)), 
             ]
@@ -200,7 +200,8 @@ class CIFAR10(DataSet):
         # default transforms
         use_transforms = [
             # Convert PIL Image to PyTorch Tensor
-            transforms.ToTensor(), 
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True),
             # Normalize inputs to canonical distribution
             transforms.Normalize((self.dist_params['mean']), (self.dist_params['std'])), 
             ]
@@ -259,7 +260,8 @@ class ImageNet2012(DataSet):
         """
         # default transforms
         use_transforms = [
-            transforms.ToTensor(),
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True),
             transforms.CenterCrop(self.center_crop),
             transforms.Normalize((self.dist_params['mean']),
                                  (self.dist_params['std'])),
