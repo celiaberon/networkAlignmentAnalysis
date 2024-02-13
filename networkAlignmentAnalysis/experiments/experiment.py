@@ -266,7 +266,7 @@ class Experiment(ABC):
                            loader_parameters={'batch_size': self.args.batch_size},
                            device=self.args.device)
     
-    def train_networks(self, nets, optimizers, dataset):
+    def train_networks(self, nets, optimizers, dataset, run=None):
         """train and test networks"""
         # do training loop
         parameters = dict(
@@ -275,6 +275,7 @@ class Experiment(ABC):
             alignment=not(self.args.no_alignment),
             delta_weights=self.args.delta_weights,
             frequency=self.args.frequency,
+            run=run
         )
 
         if self.args.use_prev & os.path.isfile(self.get_checkpoint_path()):

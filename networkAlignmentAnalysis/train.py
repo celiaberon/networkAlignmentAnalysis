@@ -1,15 +1,13 @@
 import time
 from copy import copy, deepcopy
+
+import torch
 from tqdm import tqdm
 
 import wandb
-import torch
-from networkAlignmentAnalysis.utils import (transpose_list,
-                                            condense_values,
-                                            value_by_layer,
-                                            test_nets,
-                                            train_nets,
-                                            save_checkpoint)
+from networkAlignmentAnalysis.utils import (condense_values, save_checkpoint,
+                                            test_nets, train_nets,
+                                            transpose_list, value_by_layer)
 
 
 @train_nets
@@ -175,16 +173,12 @@ def test(nets, dataset, **parameters):
         'accuracy': [correct / num_batches for correct in num_correct],
     }
 
+    if measure_alignment:
+        results['alignment'] = condense_values(transpose_list(alignment))
+
     if run is not None:
         run.summary['test_loss'] = torch.mean(torch.tensor(results['loss']))
         run.summary['test_accuracy'] = torch.mean(torch.tensor(results['accuracy']))
-
-    # return networks to whatever mode they used to be in 
-    for train_mode, net in zip(in_training_mode, nets):
-        if train_mode:
-            net.train()
-    if measure_alignment:
-        results['alignment'] = condense_values(transpose_list(alignment))
 
     return results
 

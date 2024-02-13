@@ -3,8 +3,9 @@ import torch
 import wandb
 
 from ..models.registry import get_model
-from .experiment import Experiment
 from . import arglib
+from .experiment import Experiment
+
 
 class AlignmentStatistics(Experiment):
     def get_basename(self):
@@ -16,10 +17,7 @@ class AlignmentStatistics(Experiment):
     def make_args(self, parser):
         """
         Method for adding experiment specific arguments to the argument parser
-        """
-        # checkpointing parameters
-        parser.add_argument('--use_wandb', default=False, action='store_true', help='if used, will log experiment to WandB')
-
+        """        
         parser = arglib.add_standard_training_parameters(parser)
         parser = arglib.add_checkpointing(parser)
         parser = arglib.add_dropout_experiment_details(parser)
@@ -85,9 +83,9 @@ class AlignmentStatistics(Experiment):
         do supplementary analyses
         """
         
-	run = self.configure_wandb()
+        run = self.configure_wandb()
 
-	# load networks 
+        # load networks 
         nets, optimizers, prms = self.load_networks()
 
         # load dataset
