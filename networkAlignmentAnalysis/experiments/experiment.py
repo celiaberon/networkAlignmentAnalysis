@@ -1,25 +1,22 @@
+import os
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
-import os
-from tqdm import tqdm
 from typing import Dict, List, Tuple
 
-from matplotlib import pyplot as plt
 import matplotlib as mpl
 import numpy as np
 import torch
-
+import torch.distributed as dist
+from matplotlib import pyplot as plt
+from torch.nn.parallel import DistributedDataParallel as DDP
+from tqdm import tqdm
 from .. import files
-from ..datasets import get_dataset
-from ..utils import load_checkpoints
-from .. import train
-from ..utils import (compute_stats_by_type, 
-                     load_checkpoints, 
-                     named_transpose,
-                     transpose_list,
-                     rms)
+from ..datasets impo, trainrt get_dataset
+from ..utils import load_checkpop(compute_stats_by_type, 
+                     load_checkpoints,  named_transpose, transpose_list,
+                     rms, rms))
 
 class Experiment(ABC):
     def __init__(self, args=None) -> None:
@@ -258,6 +255,27 @@ class Experiment(ABC):
         pass
 
     # -- support for main processing loop --
+    def setup_ddp(self):
+
+        # DDP setting: Turn on distributed if multiple GPUs in environment.
+        if "WORLD_SIZE" in os.environ:
+            self.args.world_size = int(os.environ["WORLD_SIZE"])
+        self.args.distributed = self.args.world_size > 1
+        ngpus_per_node = torch.cuda.device_count()
+        print(f'{ngpus_per_node=}')
+        self.args.batch_size = int(self.args.batch_size / ngpus_per_node)
+
+        if self.args.distributed:
+            if self.args.local_rank != -1: # for torch.distributed.launch
+                self.args.rank = self.args.local_rank
+                self.args.device = self.args.local_rank
+            elif 'SLURM_PROCID' in os.environ: # for slurm scheduler
+                self.args.rank = int(os.environ['SLURM_PROCID'])
+                self.args.device = self.args.rank % torch.cuda.device_count()
+            self.device = f'cuda:{self.args.device}' # update device
+            dist.init_process_group(backend=self.args.dist_backend, init_method=self.args.dist_url,
+                                    world_size=self.args.world_size, rank=self.args.rank)
+
     def prepare_dataset(self, transform_parameters):
         """simple method for getting dataset """    
         return get_dataset(self.args.dataset,

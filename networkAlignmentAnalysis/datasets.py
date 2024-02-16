@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torchvision
 from torch import nn
 from torchvision.transforms import v2 as transforms
@@ -110,8 +111,15 @@ class DataSet(ABC):
         """load dataset using the established path and parameters"""
         self.train_dataset = self.dataset_constructor(**self.dataset_kwargs(train=True))
         self.test_dataset = self.dataset_constructor(**self.dataset_kwargs(train=False))
-        self.train_loader = torch.utils.data.DataLoader(self.train_dataset, **self.dataloader_parameters)
-        self.test_loader = torch.utils.data.DataLoader(self.test_dataset, **self.dataloader_parameters)
+
+        if args.distributed:
+            train_sampler = dist.DistributedSampler(self.train_dataset)
+            test_sampler = dist.DistributedSampler(self.test, shuffle=False, drop_last=True)
+        else:
+            train_sampler = None
+            test_sampler = None
+        self.train_loader = torch.utils.data.DataLoader(self.train_dataset, sampler=train_sampler, **self.dataloader_parameters)
+        self.test_loader = torch.utils.data.DataLoader(self.test_dataset, sampler=test_sampler, **self.dataloader_parameters)
 
     def unwrap_batch(self, batch, device=None):
         """simple method for unwrapping batch for simple training loops"""

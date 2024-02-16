@@ -1,4 +1,8 @@
+import os
+
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 import wandb
 
@@ -57,10 +61,15 @@ class AlignmentStatistics(Experiment):
         
         nets = [get_model(self.args.network, build=True, dataset=self.args.dataset, dropout=self.args.default_dropout, ignore_flag=self.args.ignore_flag)
                 for _ in range(self.args.replicates)]
+        
+        if self.args.distributed:
+            nets = [DDP(net, device_ids=[self.device]) for net in nets]
+        
+        print(f'Use device as {self.device}')
         nets = [net.to(self.device) for net in nets]
         
         optimizers = [optim(net.parameters(), 
-                            lr=self.args.default_lr, 
+                            lr=self.args.default_lr,
                             weight_decay=self.args.default_wd)
                       for net in nets]
 
@@ -85,6 +94,9 @@ class AlignmentStatistics(Experiment):
         
         run = self.configure_wandb()
 
+        # Configure for DDP if using; adjust some params.
+        self.setup_ddp()
+
         # load networks 
         nets, optimizers, prms = self.load_networks()
 
@@ -93,6 +105,9 @@ class AlignmentStatistics(Experiment):
 
         # train networks
         train_results, test_results = self.train_networks(nets, optimizers, dataset, run)
+
+        # cleanup ddp
+        dist.destroy_process_group()
 
         # do targeted dropout experiment
         dropout_results, dropout_parameters = self.progressive_dropout_experiment(nets, dataset, alignment=test_results['alignment'], train_set=False)

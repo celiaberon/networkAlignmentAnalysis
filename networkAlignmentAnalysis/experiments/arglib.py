@@ -46,3 +46,20 @@ def add_dropout_experiment_details(parser):
     parser.add_argument('--dropout-by-layer', default=False, action='store_true', 
                         help='whether to do progressive dropout by layer or across all layers')
     return parser
+
+def add_ddp(parser):
+    """
+    add arguments for running distributed data parallelization
+    """
+    parser.add_argument('--world-size', default=-1, type=int,
+                        help='number of nodes for distributed training')
+    parser.add_argument('--rank', default=-1, type=int,
+                        help='node rank for distributed training')
+    parser.add_argument('--dist-url', default='env://', type=str,
+                        help='url used to set up distributed training')
+    parser.add_argument('--dist-backend', default='nccl', type=str,
+                        help='distributed backend')
+    parser.add_argument('--local_rank', default=-1, type=int,
+                        help='local rank for distributed training')
+
+    return parser

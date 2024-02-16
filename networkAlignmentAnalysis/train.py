@@ -101,6 +101,11 @@ def train(nets, optimizers, dataset, **parameters):
                           | {f'accuracies/accuracy-{ii}': dataset.measure_accuracy(output, labels) for ii, output in enumerate(outputs)}
                         #   | {f'alignments/alignment-{ii}': alignment for ii, alignment in enumerate(results['alignment'][-1])}
                           | {'batch': cidx})
+
+        # Only save checkpoint from main port when using DDP.
+        if (parameters.distributed) & (parameters.rank != 0):
+            continue
+
         if save_ckpt & (epoch % freq_ckpt == 0):
             save_checkpoint(nets,
                             optimizers,
