@@ -12,11 +12,12 @@ import torch.distributed as dist
 from matplotlib import pyplot as plt
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
-from .. import files
-from ..datasets impo, trainrt get_dataset
-from ..utils import load_checkpop(compute_stats_by_type, 
-                     load_checkpoints,  named_transpose, transpose_list,
-                     rms, rms))
+
+from .. import files, train
+from ..datasets import get_dataset
+from ..utils import (compute_stats_by_type, load_checkpoints, named_transpose,
+                     rms, transpose_list)
+
 
 class Experiment(ABC):
     def __init__(self, args=None) -> None:
