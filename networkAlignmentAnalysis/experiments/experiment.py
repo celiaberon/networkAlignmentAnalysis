@@ -259,7 +259,7 @@ class Experiment(ABC):
     def setup_ddp(self):
 
         # DDP setting: Turn on distributed if multiple GPUs in environment.
-        if "WORLD_SIZE" in os.environ:
+        if "WORLD_SIZE" in os.environ:  
             self.args.world_size = int(os.environ["WORLD_SIZE"])
         self.args.distributed = self.args.world_size > 1
         ngpus_per_node = torch.cuda.device_count()
@@ -283,7 +283,9 @@ class Experiment(ABC):
                            build=True,
                            transform_parameters=transform_parameters,
                            loader_parameters={'batch_size': self.args.batch_size},
-                           device=self.args.device)
+                           device=self.args.device,
+                           ddp_parameters={'world_size': self.args.world_size,
+                                           'local_rank': self.args.local_rank})
     
     def train_networks(self, nets, optimizers, dataset, run=None):
         """train and test networks"""
@@ -295,6 +297,7 @@ class Experiment(ABC):
             delta_weights=self.args.delta_weights,
             frequency=self.args.frequency,
             run=run
+            distributed=self.args.distributed
         )
 
         if self.args.use_prev & os.path.isfile(self.get_checkpoint_path()):

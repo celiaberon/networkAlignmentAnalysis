@@ -65,6 +65,10 @@ def train(nets, optimizers, dataset, **parameters):
 
     # --- training loop ---
     for epoch in tqdm(range(num_complete, parameters['num_epochs']), desc="training epoch"):
+
+        if parameters.get('distributed', False):
+            dataloader.sampler.set_epoch(epoch)
+
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch*len(dataloader) + idx
             images, labels = dataset.unwrap_batch(batch)

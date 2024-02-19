@@ -28,7 +28,7 @@ def default_loader_parameters(batch_size=1024, num_workers=2, shuffle=True, pin_
     return default_parameters
 
 class DataSet(ABC):
-    def __init__(self, device=None, transform_parameters={}, loader_parameters={}):
+    def __init__(self, device=None, transform_parameters={}, loader_parameters={}, ddp_parameters={}):
         # set properties of dataset and check that all required properties are defined
         self.set_properties() 
         self.check_properties() 
@@ -48,6 +48,9 @@ class DataSet(ABC):
         # define the dataloader parameters
         self.dataloader_parameters = default_loader_parameters(**loader_parameters) # get dataloader parameters
         
+        # define the distributed training parameters
+        self.ddp_parameters = ddp_parameters
+
         # load the dataset and create the dataloaders
         self.load_dataset() 
 
@@ -112,9 +115,14 @@ class DataSet(ABC):
         self.train_dataset = self.dataset_constructor(**self.dataset_kwargs(train=True))
         self.test_dataset = self.dataset_constructor(**self.dataset_kwargs(train=False))
 
-        if args.distributed:
-            train_sampler = dist.DistributedSampler(self.train_dataset)
-            test_sampler = dist.DistributedSampler(self.test, shuffle=False, drop_last=True)
+        if self.ddp_parameters.get('world_size', 1) > 1:
+            train_sampler = dist.DistributedSampler(self.train_dataset,
+                                                    num_replicas=self.ddp_parameters['world_size'], drop_last=True,
+                                                    rank=self.ddp_parameters['local_rank'])
+            test_sampler = dist.DistributedSampler(self.test_dataset, shuffle=False,
+                                                   num_replicas=self.ddp_parameters['world_size'],
+                                                   drop_last=True,
+                                                   rank=self.ddp_parameters['local_rank'])
         else:
             train_sampler = None
             test_sampler = None
