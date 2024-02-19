@@ -27,6 +27,7 @@ class AlignmentStatistics(Experiment):
         parser = arglib.add_dropout_experiment_details(parser)
         parser = arglib.add_network_metaparameters(parser)
         parser = arglib.add_alignment_analysis_parameters(parser)
+        parser = arglib.add_ddp(parser)
         return parser
 
     def configure_wandb(self):
@@ -63,7 +64,7 @@ class AlignmentStatistics(Experiment):
                 for _ in range(self.args.replicates)]
         
         if self.args.distributed:
-            nets = [DDP(net, device_ids=[self.device]) for net in nets]
+            nets = [DDP(net, device_ids=[self.args.device]) for net in nets]
         
         print(f'Use device as {self.device}')
         nets = [net.to(self.device) for net in nets]
