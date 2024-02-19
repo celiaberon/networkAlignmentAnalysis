@@ -296,7 +296,7 @@ class Experiment(ABC):
             alignment=not(self.args.no_alignment),
             delta_weights=self.args.delta_weights,
             frequency=self.args.frequency,
-            run=run
+            run=run,
             distributed=self.args.distributed
         )
 
