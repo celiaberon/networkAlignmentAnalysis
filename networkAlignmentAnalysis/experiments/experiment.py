@@ -258,22 +258,27 @@ class Experiment(ABC):
     # -- support for main processing loop --
     def setup_ddp(self):
 
+        """Set parameters for DDP management and initialize process"""
         # DDP setting: Turn on distributed if multiple GPUs in environment.
-        if "WORLD_SIZE" in os.environ:  
-            self.args.world_size = int(os.environ["WORLD_SIZE"])
+        # if "WORLD_SIZE" in os.environ:
+        #     self.args.world_size = int(os.environ["WORLD_SIZE"])
         self.args.distributed = self.args.world_size > 1
         ngpus_per_node = torch.cuda.device_count()
         print(f'{ngpus_per_node=}')
         self.args.batch_size = int(self.args.batch_size / ngpus_per_node)
-
+        print(f'adjusted batch size={self.args.batch_size}')
         if self.args.distributed:
             if self.args.local_rank != -1: # for torch.distributed.launch
                 self.args.rank = self.args.local_rank
                 self.args.device = self.args.local_rank
             elif 'SLURM_PROCID' in os.environ: # for slurm scheduler
+                print(f"slurm procid: {os.environ['SLURM_PROCID']}")
                 self.args.rank = int(os.environ['SLURM_PROCID'])
                 self.args.device = self.args.rank % torch.cuda.device_count()
-            self.device = f'cuda:{self.args.device}' # update device
+            print(f'rank = {self.args.rank}')
+            print(f'device = {self.args.device}')
+
+            self.device = f'cuda:{self.args.device}' # update device for moddel and dataset
             dist.init_process_group(backend=self.args.dist_backend, init_method=self.args.dist_url,
                                     world_size=self.args.world_size, rank=self.args.rank)
 
@@ -285,7 +290,7 @@ class Experiment(ABC):
                            loader_parameters={'batch_size': self.args.batch_size},
                            device=self.args.device,
                            ddp_parameters={'world_size': self.args.world_size,
-                                           'local_rank': self.args.local_rank})
+                                           'rank': self.args.rank})
     
     def train_networks(self, nets, optimizers, dataset, run=None):
         """train and test networks"""
