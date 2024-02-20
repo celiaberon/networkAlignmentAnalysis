@@ -107,7 +107,7 @@ def train(nets, optimizers, dataset, **parameters):
                           | {'batch': cidx})
 
         # Only save checkpoint from main port when using DDP.
-        if (parameters.distributed) & (parameters.rank != 0):
+        if (parameters.get('distributed', False)) & (parameters.get('rank', -1) != 0):
             continue
 
         if save_ckpt & (epoch % freq_ckpt == 0):

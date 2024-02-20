@@ -118,11 +118,11 @@ class DataSet(ABC):
         if self.ddp_parameters.get('world_size', 1) > 1:
             train_sampler = dist.DistributedSampler(self.train_dataset,
                                                     num_replicas=self.ddp_parameters['world_size'], drop_last=True,
-                                                    rank=self.ddp_parameters['local_rank'])
+                                                    rank=self.ddp_parameters['rank'])
             test_sampler = dist.DistributedSampler(self.test_dataset, shuffle=False,
                                                    num_replicas=self.ddp_parameters['world_size'],
                                                    drop_last=True,
-                                                   rank=self.ddp_parameters['local_rank'])
+                                                   rank=self.ddp_parameters['rank'])
         else:
             train_sampler = None
             test_sampler = None

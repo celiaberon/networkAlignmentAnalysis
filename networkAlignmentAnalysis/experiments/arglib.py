@@ -61,5 +61,9 @@ def add_ddp(parser):
                         help='distributed backend')
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='local rank for distributed training')
+    parser.add_argument('--port', default=12345, type=str,
+                        help='port id to set for main process')
+    parser.add_argument('--addr', default=-1, type=str,
+                        help='host address')
 
     return parser

@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
+import socket
 from typing import Dict, List, Tuple
 
 import matplotlib as mpl
@@ -255,26 +256,47 @@ class Experiment(ABC):
         """
         pass
 
+    def find_available_port(self, start_port, end_port):
+        """Find an available port within a specified range."""
+        for port in range(start_port, end_port + 1):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('localhost', port))
+                return str(port)
+            except OSError:
+                continue
+        raise RuntimeError("Could not find an available port in the specified range.")
+
     # -- support for main processing loop --
     def setup_ddp(self):
 
         """Set parameters for DDP management and initialize process"""
+        print(f'master port = {os.environ["MASTER_PORT"]}')
+        os.environ['MASTER_PORT'] = self.find_available_port(29500, 30000)
+        os.environ['MASTER_ADDR'] = self.args.addr
+        print(f'master port = {os.environ["MASTER_PORT"]}')
+        print(f'master address = {os.environ["MASTER_ADDR"]}')
         # DDP setting: Turn on distributed if multiple GPUs in environment.
-        # if "WORLD_SIZE" in os.environ:
-        #     self.args.world_size = int(os.environ["WORLD_SIZE"])
+        if "WORLD_SIZE" in os.environ:
+            self.args.world_size = int(os.environ["WORLD_SIZE"])
+            print('world size from env: ', self.args.world_size)
         self.args.distributed = self.args.world_size > 1
         ngpus_per_node = torch.cuda.device_count()
         print(f'{ngpus_per_node=}')
         self.args.batch_size = int(self.args.batch_size / ngpus_per_node)
         print(f'adjusted batch size={self.args.batch_size}')
         if self.args.distributed:
-            if self.args.local_rank != -1: # for torch.distributed.launch
+            if 'LOCAL_RANK' in os.environ: # from torchrun
+                self.args.local_rank = int(os.environ['LOCAL_RANK'])
+                self.args.rank = int(os.environ['RANK'])
+                self.args.device = self.args.local_rank
+            elif self.args.local_rank != -1: # for torch.distributed.launch
                 self.args.rank = self.args.local_rank
                 self.args.device = self.args.local_rank
             elif 'SLURM_PROCID' in os.environ: # for slurm scheduler
                 print(f"slurm procid: {os.environ['SLURM_PROCID']}")
                 self.args.rank = int(os.environ['SLURM_PROCID'])
-                self.args.device = self.args.rank % torch.cuda.device_count()
+                self.args.device = self.args.rank % ngpus_per_node
             print(f'rank = {self.args.rank}')
             print(f'device = {self.args.device}')
 
