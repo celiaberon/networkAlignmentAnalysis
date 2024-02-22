@@ -67,8 +67,11 @@ class AlignmentStatistics(Experiment):
         nets = [net.to(self.device) for net in nets]
 
         if self.args.distributed:
-            nets = [DDP(net, device_ids=[self.args.device]) for net in nets]
-
+            # Create DDP wrapped model as reference so we retain access to the AlignmentNetwork attributes.
+            for net in nets:
+                net.model = DDP(net, device_ids=[self.args.device])
+            #nets = [DDP(net, device_ids=[self.args.device]) for net in nets]
+        
         optimizers = [optim(net.parameters(), 
                             lr=self.args.default_lr,
                             weight_decay=self.args.default_wd)

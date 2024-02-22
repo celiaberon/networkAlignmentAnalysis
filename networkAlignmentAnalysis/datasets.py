@@ -116,13 +116,14 @@ class DataSet(ABC):
         self.test_dataset = self.dataset_constructor(**self.dataset_kwargs(train=False))
 
         if self.ddp_parameters.get('world_size', 1) > 1:
-            train_sampler = dist.DistributedSampler(self.train_dataset,
+            train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset,
                                                     num_replicas=self.ddp_parameters['world_size'], drop_last=True,
                                                     rank=self.ddp_parameters['rank'])
-            test_sampler = dist.DistributedSampler(self.test_dataset, shuffle=False,
+            test_sampler = torch.utils.data.distributed.DistributedSampler(self.test_dataset, shuffle=False,
                                                    num_replicas=self.ddp_parameters['world_size'],
                                                    drop_last=True,
                                                    rank=self.ddp_parameters['rank'])
+            self.dataloader_parameters['shuffle'] = False
         else:
             train_sampler = None
             test_sampler = None
