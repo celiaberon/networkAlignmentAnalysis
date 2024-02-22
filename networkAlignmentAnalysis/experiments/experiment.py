@@ -273,6 +273,8 @@ class Experiment(ABC):
         """Set parameters for DDP management and initialize process"""
         os.environ['MASTER_PORT'] = os.environ['HOST_PORT'] # self.find_available_port(29500, 30000)
         os.environ['MASTER_ADDR'] = os.environ['HOST_ADDR']
+        host_ip = os.environ['MASTER_ADDR']
+        port_id = os.environ['MASTER_PORT']
         print(f'host address = {os.environ["HOST_ADDR"]}')
         print(f'master address = {os.environ["MASTER_ADDR"]}')
         # DDP setting: Turn on distributed if multiple GPUs in environment.
@@ -285,27 +287,33 @@ class Experiment(ABC):
         self.args.batch_size = int(self.args.batch_size / ngpus_per_node)
         print(f'adjusted batch size={self.args.batch_size}')
         if self.args.distributed:
-            if 'LOCAL_RANK' in os.environ: # from torchrun
-                self.args.local_rank = int(os.environ['LOCAL_RANK'])
-                self.args.rank = int(os.environ['RANK'])
-                self.args.device = self.args.local_rank
+            #if 'LOCAL_RANK' in os.environ: # from torchrun
+            #    self.args.local_rank = int(os.environ['LOCAL_RANK'])
+            #    self.args.rank = int(os.environ['RANK'])
+            #    self.args.device = self.args.local_rank
             #elif self.args.local_rank != -1: # for torch.distributed.launch
             #    self.args.rank = self.args.local_rank
             #    self.args.device = self.args.local_rank
-            #elif 'SLURM_PROCID' in os.environ: # for slurm scheduler
-            #    print(f'env rank: {os.environ["RANK"]}')
-            #    print(f"slurm procid: {os.environ['SLURM_PROCID']}")
-            #    self.args.rank = int(os.environ['SLURM_PROCID'])
-            #    self.args.device = self.args.rank % ngpus_per_node
+            if 'SLURM_PROCID' in os.environ: # for slurm scheduler
+           #     print(f'env rank: {os.environ["RANK"]}')
+                print(f"slurm procid: {os.environ['SLURM_PROCID']}")
+                self.args.rank = int(os.environ['SLURM_PROCID'])
+                self.args.local_rank = self.args.rank - ngpus_per_node * (self.args.rank // ngpus_per_node)
+                self.args.device = self.args.rank % ngpus_per_node
             print(f'rank = {self.args.rank}')
             print(f'device = {self.args.device}')
-
+            print(f'local_rank = {self.args.local_rank}')
             self.device = f'cuda:{self.args.device}' # update device for moddel and dataset
-            dist.init_process_group(backend=self.args.dist_backend, init_method=self.args.dist_url,
+            #dist.init_process_group(backend='nccl')
+            dist.init_process_group(backend=self.args.dist_backend,
                                     world_size=self.args.world_size, rank=self.args.rank)
+            print(f'created process for {dist.get_rank()}')
+            #dist.init_process_group(backend=self.args.dist_backend, init_method=f'tcp://{host_ip}:{port_id}',
+            #                        world_size=self.args.world_size, rank=self.args.rank)
+            dist.barrier()
 
     def prepare_dataset(self, transform_parameters):
-        """simple method for getting dataset """    
+        """simple method for getting dataset """   
         return get_dataset(self.args.dataset,
                            build=True,
                            transform_parameters=transform_parameters,
