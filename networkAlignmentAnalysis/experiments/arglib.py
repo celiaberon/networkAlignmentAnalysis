@@ -65,5 +65,4 @@ def add_ddp(parser):
                         help='port id to set for main process')
     parser.add_argument('--addr', default=-1, type=str,
                         help='host address')
-
     return parser
