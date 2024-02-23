@@ -516,7 +516,7 @@ class AlignmentNetwork(nn.Module, ABC):
         
                 
     @torch.no_grad()
-    def measure_eigenfeatures(self, dataloader, with_updates=True, centered=True):
+    def measure_eigenfeatures(self, inputs, with_updates=True, centered=True):
         """
         measure the eigenvalues and eigenvectors of the input to each layer
         and also measure how much each weight array uses each eigenvector
@@ -534,9 +534,6 @@ class AlignmentNetwork(nn.Module, ABC):
         for convolutional layers, will unfold and measure eigenfeatures for each 
         stride (and take the average across strides weighted by input variance)
         """
-        # get inputs to layers for entire dataset in dataloader
-        inputs, _ = self._process_collect_activity(dataloader, with_updates=with_updates, use_training_mode=False)
-        
         # retrieve weights, reshape, and flatten inputs as required
         weights = self.get_alignment_weights(flatten=True)
         inputs = self._preprocess_inputs(inputs)
@@ -545,7 +542,7 @@ class AlignmentNetwork(nn.Module, ABC):
         return self._measure_layer_eigenfeatures(inputs, weights, centered=centered, with_updates=with_updates)
     
 
-    def measure_class_eigenfeatures(self, dataloader, eigenvectors, rms=False, with_updates=True):
+    def measure_class_eigenfeatures(self, inputs, labels, eigenvectors, rms=False, with_updates=True):
         """
         propagate an entire dataset through the network and measure the contribution
         of each eigenvector to each element of the class
@@ -560,12 +557,10 @@ class AlignmentNetwork(nn.Module, ABC):
 
         if rms=True, will convert beta_by_class to an average with the RMS method
         """
-        # get inputs and labels to layers for entire dataset in dataloader
-        inputs, labels = self._process_collect_activity(dataloader, with_updates=with_updates, use_training_mode=False)
-
         # get stacked indices to the elements of each class
-        num_classes = len(dataloader.dataset.classes)
-        idx_to_class = [torch.where(labels==ii)[0] for ii in range(num_classes)]
+        classes = torch.unique(labels)
+        num_classes = len(classes)
+        idx_to_class = [torch.where(labels==ii)[0] for ii in classes]
         num_per_class = [len(idx) for idx in idx_to_class]
         min_per_class = min(num_per_class)
         if any([npc>min_per_class for npc in num_per_class]):
@@ -658,7 +653,7 @@ class AlignmentNetwork(nn.Module, ABC):
         return beta, eigenvalues, eigenvectors
     
     
-    def _process_collect_activity(self, dataloader, with_updates=True, use_training_mode=False):
+    def _process_collect_activity(self, dataset, train_set=True, with_updates=True, use_training_mode=False):
         """
         helper for processing and collecting activity of network in response to all inputs of dataloader
 
@@ -680,9 +675,10 @@ class AlignmentNetwork(nn.Module, ABC):
         # store input and measure activations for every element in dataloader
         allinputs = []
         alllabels = []
+        dataloader = dataset.train_loader if train_set else dataset.test_loader
         dataloop = tqdm(dataloader) if with_updates else dataloader
-        for input, labels in dataloop:
-            input = input.to(device)
+        for batch in dataloop:
+            input, labels = dataset.unwrap_batch(batch, device=device)
             layer_inputs = [input.cpu() for input in self.get_layer_inputs(input, precomputed=False)]
             allinputs.append(layer_inputs)
             alllabels.append(labels.cpu())
@@ -697,9 +693,72 @@ class AlignmentNetwork(nn.Module, ABC):
 
         # return outputs
         return inputs, labels
-        
 
-    
+    @torch.no_grad()
+    def shape_eigenfeatures(self, idx_layers, eigenvalues, eigenvectors, eval_transform):
+        """
+        method for shaping the eigenfeatures of a network
+
+        use eval_transform to shape a network by changing the scale of each 
+        eigenvector's contribution to the weights based on the associated
+        eigenvalue for a specific set of layers.
+
+        idx_layers is a list indicating which layers to shape (where the indices
+        should correspond to indices in self.get_alignment_layer_indices())
+
+        eigenvalues and eigenvectors should be a list with length=len(idx_layers)
+        and each should correspond to the eigenvalues & eigenvectors of the input
+        to each layer in idx_layers
+
+        eval_transform is a callable function that takes a set of eigenvalues and
+        returns the desired scale of eigenvectors associated with each eigenvalue
+        for example, if eigenvalues[0]=[1, 0.5, 0.25, 0.125]*37.9991, eval_transform
+        might return [1, 1, 1, 0] which simply "kills" the last eigenvector
+        alternatively, it could return [1, 0.25, 0.25**2, 0.125**2]*37.9991**2/sum 
+        where it shapes each eigenvector by the square of the eigenvalues
+        """
+        # do some input checks
+        assert all([idx in self.get_alignment_layer_indices() for idx in idx_layers]), (
+            "idx_layers includes some indices not in alignment layers",
+            f"(provided: {idx_layers}, alignment_layer_indices: {self.get_alignment_layer_indices()})"
+        )
+        assert len(idx_layers)==len(eigenvalues), "length of idx_layers and eigenvalues doesn't match"
+        assert len(idx_layers)==len(eigenvectors), "length of idx_layers and eigenvectors doesn't match"
+
+        # make sure eigenvalues and eigenvalues are on same device as network
+        device = get_device(self)
+        eigenvalues = [evals.to(device) for evals in eigenvalues]
+        eigenvectors = [evecs.to(device) for evecs in eigenvectors]
+
+        # get weights and original shapes of requested alignment layers
+        weight_shape = [self.get_alignment_weights(idx=idx).shape for idx in idx_layers]
+        weights = [self.get_alignment_weights(idx=idx, flatten=True) for idx in idx_layers]
+        
+        # measure original norm of weights
+        norm_of_weights = [torch.norm(weight, dim=1, keepdim=True) for weight in weights]
+
+        # normalize weight vector
+        weights = [weight / torch.norm(weight, dim=1, keepdim=True) for weight in weights]
+        
+        # for each layer, process the eigenvalues, shape the weights, and update the network
+        zipped = zip(idx_layers, eigenvalues, eigenvectors, weights, norm_of_weights, weight_shape)
+        for idx, evals, evecs, weight, norm_weight, shape in zipped:
+            # transform eigenvalues
+            eval_keep_fraction = eval_transform(evals)
+            assert type(eval_keep_fraction)==type(evals) and eval_keep_fraction.shape==evals.shape, "eval_transform returned new evals with the wrong type or shape"
+            # define a projection matrix that scales the contribution of each eigenvalue by eval_keep_fraction
+            proj_matrix = evecs @ torch.diag(eval_keep_fraction) @ evecs.T
+            # shape the weights
+            shaped_weights = weight @ proj_matrix
+            # renormalize them to their original norm
+            shaped_weights = shaped_weights / torch.norm(shaped_weights, dim=1, keepdim=True) # normalize
+            shaped_weights = shaped_weights * norm_weight
+            # reshape to original shape
+            shaped_weights = torch.reshape(shaped_weights, shape)
+            # update the network
+            self.get_alignment_layers(idx=idx).weight.data = shaped_weights
+            
+
 
 # def ExperimentalNetwork(AlignmentNetwork):
 #     """maintain some experimental methods here"""
@@ -732,31 +791,4 @@ class AlignmentNetwork(nn.Module, ABC):
 #         self.fc4.weight.data = self.fc4.weight.data / torch.norm(self.fc4.weight.data,dim=1,keepdim=True)
 #         #print(f"fc4: Weight.shape:{self.fc4.weight.data.shape}, update.shape:{dfc4.shape}")
 
-#     def manualShape(self,evals,evecs,DEVICE,evalTransform=None):
-#         if evalTransform is None:
-#             evalTransform = lambda x:x
-            
-#         sbetas = [] # produce signed betas
-#         netweights = self.getNetworkWeights()
-#         for evc,nw in zip(evecs,netweights):
-#             nw = nw / torch.norm(nw,dim=1,keepdim=True)
-#             sbetas.append(nw.cpu() @ evc)
-        
-#         shapedWeights = [[] for _ in range(self.numLayers)]
-#         for layer in range(self.numLayers):
-#             assert np.all(evals[layer]>=0), "Found negative eigenvalues..."
-#             cFractionVariance = evals[layer]/np.sum(evals[layer]) # compute fraction of variance explained by each eigenvector
-#             cKeepFraction = evalTransform(cFractionVariance).astype(cFractionVariance.dtype) # make sure the datatype doesn't change, otherwise pytorch einsum will be unhappy
-#             assert np.all(cKeepFraction>=0), "Found negative transformed keep fractions. This means the transform function has an improper form." 
-#             assert np.all(cKeepFraction<=1), "Found keep fractions greater than 1. This is bad practice, design the evalTransform function to have a domain and range within [0,1]"
-#             weightNorms = torch.norm(netweights[layer],dim=1,keepdim=True) # measure norm of weights (this will be invariant to the change)
-#             evecComposition = torch.einsum('oi,xi->oxi',sbetas[layer],torch.tensor(evecs[layer])) # create tensor composed of each eigenvector scaled to it's contribution in each weight vector
-#             newComposition = torch.einsum('oxi,i->ox',evecComposition,torch.tensor(cKeepFraction)).to(DEVICE) # scale eigenvectors based on their keep fraction (by default scale them by their variance)
-#             shapedWeights[layer] = newComposition / torch.norm(newComposition,dim=1,keepdim=True) * weightNorms
-        
-#         # Assign new weights to network
-#         self.fc1.weight.data = shapedWeights[0]
-#         self.fc2.weight.data = shapedWeights[1]
-#         self.fc3.weight.data = shapedWeights[2]
-#         self.fc4.weight.data = shapedWeights[3]
-
+#     
