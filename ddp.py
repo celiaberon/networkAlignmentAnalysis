@@ -1,16 +1,17 @@
 import argparse
+import os
+from socket import gethostname
+
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
-
-import os
-import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from socket import gethostname
+from torch.optim.lr_scheduler import StepLR
 
 from networkAlignmentAnalysis import datasets
 from networkAlignmentAnalysis.models.registry import get_model
+
 
 def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
     dataloader = dataset.train_loader if train else dataset.test_loader
@@ -23,6 +24,7 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
     model.train()
     for batch_idx, batch in enumerate(dataloader):
         data, target = dataset.unwrap_batch(batch, device=device)
+        if batch_idx==0: print(f'{rank=}: {data.shape}')
         optimizer.zero_grad()
         output = model(data)
         loss = dataset.measure_loss(output, target)
@@ -98,6 +100,11 @@ def main():
         num_workers=int(os.environ["SLURM_CPUS_PER_TASK"]),
     )
 
+    sampler_parameters = dict(
+        world_size=world_size,
+        rank=rank
+    )
+
     if world_size > 1:
         setup(rank, world_size)
         if rank == 0: 
@@ -110,7 +117,8 @@ def main():
     model_name = 'AlexNet'
     dataset_name = 'ImageNet'
     net = get_model(model_name, build=True, dataset=dataset_name)
-    dataset = create_dataset(dataset_name, net, distributed=world_size>1, loader_parameters=loader_parameters)
+    dataset = create_dataset(dataset_name, net, distributed=world_size>1, loader_parameters=loader_parameters,
+                             sampler_parameters=sampler_parameters)
 
     model = net.to(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank]) if world_size > 1 else model
