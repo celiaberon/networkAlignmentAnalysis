@@ -55,9 +55,10 @@ def test(model, device, dataset, train=False):
         test_loss, correct, len(dataloader.dataset),
         100. * correct / len(dataloader.dataset)))
 
-def create_dataset(name, net, distributed=True, loader_parameters={}):
+def create_dataset(name, net, distributed=True, loader_parameters={}), sampler_params={}:
     return datasets.get_dataset(name, build=True, distributed=distributed, 
-                                transform_parameters=net, loader_parameters=loader_parameters)
+                                transform_parameters=net, loader_parameters=loader_parameters,
+                                sampler_params=sampler_params)
 
 def setup(rank, world_size):
     # initialize the process group
@@ -118,7 +119,7 @@ def main():
     dataset_name = 'ImageNet'
     net = get_model(model_name, build=True, dataset=dataset_name)
     dataset = create_dataset(dataset_name, net, distributed=world_size>1, loader_parameters=loader_parameters,
-                             sampler_parameters=sampler_parameters)
+                             sampler_params=sampler_parameters)
 
     model = net.to(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank]) if world_size > 1 else model
