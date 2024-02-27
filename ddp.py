@@ -21,8 +21,9 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
         else:
             dataset.test_sampler.set_epoch(epoch)
 
-    n_groups=args.
+    n_groups=args.world_size
     group_list = [torch.zeros(2, dtype=torch.int64) for proc in len(dataloader)*n_groups]
+    print(group_list)
     tensor_list = []
 
     model.train()
@@ -35,12 +36,15 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
         optimizer.step()
 
         tensor_list.append(torch.tensor([rank, rank * batch_idx], dtype=torch.cfloat))
-
+        
         if batch_idx % args.log_interval == 0:
             if rank==0:
                 print(f"Train Epoch: {epoch} [{batch_idx}/{len(dataloader)} ({100.*batch_idx/len(dataloader):.0f}%)] \t Loss: {loss.item():.6f}")
             if args.dry_run:
                 break
+
+    dist.all_gather(group_list, tensor_list)
+    print(group_list)
 
 def test(model, device, dataset, train=False):
     dataloader = dataset.train_loader if train else dataset.test_loader
@@ -108,11 +112,6 @@ def main():
         num_workers=int(os.environ["SLURM_CPUS_PER_TASK"]),
     )
 
-    sampler_parameters = dict(
-        world_size=world_size,
-        rank=rank
-    )
-
     if world_size > 1:
         setup(rank, world_size)
         if rank == 0: 
@@ -125,8 +124,7 @@ def main():
     model_name = 'MLP'
     dataset_name = 'MNIST'
     net = get_model(model_name, build=True, dataset=dataset_name)
-    dataset = create_dataset(dataset_name, net, distributed=world_size>1, loader_parameters=loader_parameters,
-                             sampler_params=sampler_parameters)
+    dataset = create_dataset(dataset_name, net, distributed=world_size>1, loader_parameters=loader_parameters)
 
     model = net.to(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank]) if world_size > 1 else model

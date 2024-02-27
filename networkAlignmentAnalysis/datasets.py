@@ -28,7 +28,7 @@ def default_loader_parameters(distributed, batch_size=1024, num_workers=2, shuff
     return default_parameters
 
 class DataSet(ABC):
-    def __init__(self, device=None, distributed=False, dataset_parameters={}, transform_parameters={}, loader_parameters={}, sampler_params={}):
+    def __init__(self, device=None, distributed=False, dataset_parameters={}, transform_parameters={}, loader_parameters={}):
         # set properties of dataset and check that all required properties are defined
         self.set_properties() 
         self.check_properties() 
@@ -51,7 +51,7 @@ class DataSet(ABC):
         
         # load the dataset and create the dataloaders
         self.dataset_parameters = dataset_parameters
-        self.load_dataset(**dataset_parameters, **sampler_params) 
+        self.load_dataset(**dataset_parameters) 
 
     def check_properties(self):
         """
@@ -97,13 +97,13 @@ class DataSet(ABC):
         """
         pass
 
-    def load_dataset(self, world_size=0, rank=0, **kwargs):
+    def load_dataset(self, **kwargs):
         """load dataset using the established path and parameters"""
         self.train_dataset = self.dataset_constructor(**self.dataset_kwargs(train=True, **kwargs))
         self.test_dataset = self.dataset_constructor(**self.dataset_kwargs(train=False, **kwargs))
-        self.train_sampler = (DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank)
+        self.train_sampler = (DistributedSampler(self.train_dataset)
                               if self.distributed else None)
-        self.test_sampler = (DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
+        self.test_sampler = (DistributedSampler(self.test_dataset)
                              if self.distributed else None)
         self.train_loader = torch.utils.data.DataLoader(self.train_dataset, sampler=self.train_sampler,
                                                         **self.dataloader_parameters)
