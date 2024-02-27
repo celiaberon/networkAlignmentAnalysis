@@ -20,16 +20,22 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
             dataset.train_sampler.set_epoch(epoch)
         else:
             dataset.test_sampler.set_epoch(epoch)
-    
+
+    n_groups=args.
+    group_list = [torch.zeros(2, dtype=torch.int64) for proc in len(dataloader)*n_groups]
+    tensor_list = []
+
     model.train()
     for batch_idx, batch in enumerate(dataloader):
         data, target = dataset.unwrap_batch(batch, device=device)
-        if batch_idx==0: print(f'{rank=}: {data.shape}')
         optimizer.zero_grad()
         output = model(data)
         loss = dataset.measure_loss(output, target)
         loss.backward()
         optimizer.step()
+
+        tensor_list.append(torch.tensor([rank, rank * batch_idx], dtype=torch.cfloat))
+
         if batch_idx % args.log_interval == 0:
             if rank==0:
                 print(f"Train Epoch: {epoch} [{batch_idx}/{len(dataloader)} ({100.*batch_idx/len(dataloader):.0f}%)] \t Loss: {loss.item():.6f}")
@@ -68,7 +74,7 @@ def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch ImageNet Example')
     parser.add_argument('--batch-size', type=int, default=128, metavar='N',
-                        help='input batch size for training (default: 64)')
+                        help='input batch size for training (default: 128)')
     parser.add_argument('--epochs', type=int, default=14, metavar='N',
                         help='number of epochs to train (default: 14)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR',
@@ -90,6 +96,7 @@ def main():
     torch.manual_seed(args.seed)
 
     world_size = int(os.environ["WORLD_SIZE"])
+    args.world_size = world_size
     rank = int(os.environ["SLURM_PROCID"])
     gpus_per_node = int(os.environ["SLURM_GPUS_ON_NODE"])
     assert gpus_per_node == torch.cuda.device_count()
@@ -115,8 +122,8 @@ def main():
     torch.cuda.set_device(local_rank)
     print(f"host: {gethostname()}, rank: {rank}, local_rank: {local_rank}")
 
-    model_name = 'AlexNet'
-    dataset_name = 'ImageNet'
+    model_name = 'MLP'
+    dataset_name = 'MNIST'
     net = get_model(model_name, build=True, dataset=dataset_name)
     dataset = create_dataset(dataset_name, net, distributed=world_size>1, loader_parameters=loader_parameters,
                              sampler_params=sampler_parameters)

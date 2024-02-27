@@ -99,7 +99,6 @@ class DataSet(ABC):
 
     def load_dataset(self, world_size=0, rank=0, **kwargs):
         """load dataset using the established path and parameters"""
-        print(f'{world_size=}\n{rank=}')
         self.train_dataset = self.dataset_constructor(**self.dataset_kwargs(train=True, **kwargs))
         self.test_dataset = self.dataset_constructor(**self.dataset_kwargs(train=False, **kwargs))
         self.train_sampler = (DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank)
