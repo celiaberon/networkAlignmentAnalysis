@@ -55,7 +55,7 @@ def test(model, device, dataset, train=False):
         test_loss, correct, len(dataloader.dataset),
         100. * correct / len(dataloader.dataset)))
 
-def create_dataset(name, net, distributed=True, loader_parameters={}), sampler_params={}:
+def create_dataset(name, net, distributed=True, loader_parameters={}, sampler_params={}):
     return datasets.get_dataset(name, build=True, distributed=distributed, 
                                 transform_parameters=net, loader_parameters=loader_parameters,
                                 sampler_params=sampler_params)
