@@ -21,11 +21,7 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
         else:
             dataset.test_sampler.set_epoch(epoch)
 
-    n_groups=args.world_size
-    group_list = [torch.zeros(2, dtype=torch.int64) for proc in len(dataloader)*n_groups]
-    print(group_list)
-    tensor_list = []
-
+    gathered_data = []
     model.train()
     for batch_idx, batch in enumerate(dataloader):
         data, target = dataset.unwrap_batch(batch, device=device)
@@ -35,16 +31,27 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
         loss.backward()
         optimizer.step()
 
-        tensor_list.append(torch.tensor([rank, rank * batch_idx], dtype=torch.cfloat))
-        
+        gathered_data_per_iter = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(dist.get_world_size())]  # Placeholder to gather tensors
+        local_metric = torch.tensor([rank, batch_idx], dtype=torch.int64, device=device)
+        if dist.get_rank()==0:
+            dist.gather(local_metric, gathered_data_per_iter, dst=0)  # Gather data tensors onto process 0
+        else:
+            dist.gather(local_metric, dst=0)
+        # On process 0, accumulate gathered tensors
+        if dist.get_rank() == 0:
+            gathered_data.extend(gathered_data_per_iter)
+
         if batch_idx % args.log_interval == 0:
             if rank==0:
                 print(f"Train Epoch: {epoch} [{batch_idx}/{len(dataloader)} ({100.*batch_idx/len(dataloader):.0f}%)] \t Loss: {loss.item():.6f}")
             if args.dry_run:
                 break
 
-    dist.all_gather(group_list, tensor_list)
-    print(group_list)
+    if rank==0:
+        print('\nGroup List:')
+        [t.to(device) for t in gathered_data]
+        gathered_data = torch.stack(gathered_data)
+        print(gathered_data[:10])
 
 def test(model, device, dataset, train=False):
     dataloader = dataset.train_loader if train else dataset.test_loader
@@ -67,8 +74,7 @@ def test(model, device, dataset, train=False):
 
 def create_dataset(name, net, distributed=True, loader_parameters={}, sampler_params={}):
     return datasets.get_dataset(name, build=True, distributed=distributed, 
-                                transform_parameters=net, loader_parameters=loader_parameters,
-                                sampler_params=sampler_params)
+                                transform_parameters=net, loader_parameters=loader_parameters)
 
 def setup(rank, world_size):
     # initialize the process group
