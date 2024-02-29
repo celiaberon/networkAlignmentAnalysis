@@ -1,11 +1,13 @@
-from warnings import warn
-from typing import List
 from contextlib import contextmanager
 from functools import wraps
+from typing import List
+from warnings import warn
+
 import numpy as np
+import torch
+import torch.distributed as dist
 from scipy.linalg import null_space
 from sklearn.decomposition import IncrementalPCA
-import torch
 
 
 # -------------- context managers & decorators --------------
@@ -592,3 +594,15 @@ def load_checkpoints(nets, optimizers, device, path):
         [net.to(device) for net in nets]
 
     return nets, optimizers, checkpoint
+
+
+def gather_dist_metric(local_metric, grp_metric):
+
+
+    if dist.get_rank()==0:
+        # Gather data tensors onto process 0.
+        dist.gather(local_metric, grp_metric, dst=0)  
+    else:
+        # Just send data from other processes.
+        dist.gather(local_metric, dst=0)  
+

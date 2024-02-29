@@ -1,21 +1,22 @@
 import argparse
-import torch
-import torch.nn.functional as F
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
-
 import os
 import sys
 import time
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from socket import gethostname
+
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.optim.lr_scheduler import StepLR
 
 mainPath = os.path.dirname(os.path.abspath(__file__)) + "/.."
 sys.path.append(mainPath)
 
 from networkAlignmentAnalysis import datasets
 from networkAlignmentAnalysis.models.registry import get_model
+from networkAlignmentAnalysis.utils import gather_dist_metric
 
 
 def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
@@ -29,6 +30,11 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
     if rank == 0:
         first_batch_timer = time.time()
 
+
+    nsteps = len(dataloader)
+    local_array = torch.zeros((nsteps, 2), dtype=torch.int64, device=device)
+    gathered_array = [torch.zeros_like(local_array) for _ in dist.get_world_size()]
+    # gathered_data = [] # Initialize main list for aggregating data
     model.train()
     for batch_idx, batch in enumerate(dataloader):
         data, target = dataset.unwrap_batch(batch, device=device)
@@ -41,6 +47,26 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
         loss = dataset.measure_loss(output, target)
         loss.backward()
         optimizer.step()
+
+        local_array[batch_idx] = torch.tensor([rank, batch_idx], device=device)
+
+        # # Create placeholder with correct dims to gather tensors.
+        # gathered_data_per_iter = [torch.zeros(2, dtype=torch.int64, device=device)
+        # for _ in range(dist.get_world_size())]
+        # local_metric = torch.tensor([rank, batch_idx], dtype=torch.int64, device=device)
+        # if dist.get_rank()==0:
+        #     # Gather data tensors onto process 0.
+        #     dist.gather(local_metric, gathered_data_per_iter, dst=0)  
+        # else:
+        #     # Just send data from other processes.
+        #     dist.gather(local_metric, dst=0)  
+        
+        # gather_dist_metric(local_metric, gathered_data_per_iter)
+
+        # On process 0, accumulate gathered tensors into main list.
+        # if dist.get_rank() == 0:
+        #     gathered_data.extend(gathered_data_per_iter)
+
         if batch_idx % args.log_interval == 0:
             if rank == 0:
                 print(
@@ -48,6 +74,19 @@ def train(args, model, device, dataset, optimizer, epoch, rank, train=True):
                 )
             if args.dry_run:
                 break
+
+        # if rank==0:
+        #     print('\nGroup List:')
+        #     [t.to(device) for t in gathered_data]  # move all tensors to main process
+        #     gathered_data = torch.stack(gathered_data)
+        #     print(gathered_data[:10])
+        
+    gather_dist_metric(local_array, gathered_array)
+    if rank==0:
+        print('\nGroup List:')
+        [t.to(device) for t in gathered_array]  # move all tensors to main process
+        gathered_array = torch.stack(gathered_array)
+        print(gathered_array[:10])
 
 
 def test(model, device, dataset, train=False):
