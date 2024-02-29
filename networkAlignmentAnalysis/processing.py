@@ -72,14 +72,14 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
     beta, eigvals, eigvecs, class_betas = [], [], [], []
     for net in tqdm(nets):
         # get inputs to each layer from whole dataloader
-        inputs, labels = net._process_collect_activity(
+        inputs, labels = net.module._process_collect_activity(
             dataset,
             train_set=train_set,
             with_updates=False,
             use_training_mode=False,
         )
-        eigenfeatures = net.measure_eigenfeatures(inputs, with_updates=False)
-        beta_by_class = net.measure_class_eigenfeatures(
+        eigenfeatures = net.module.measure_eigenfeatures(inputs, with_updates=False)
+        beta_by_class = net.module.measure_class_eigenfeatures(
             inputs, labels, eigenfeatures[2], rms=False, with_updates=False
         )
         beta.append(eigenfeatures[0])

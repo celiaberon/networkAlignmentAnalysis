@@ -459,7 +459,7 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
         nets = [nets]
 
     # get index to each alignment layer
-    idx_dropout_layers = nets[0].get_alignment_layer_indices()
+    idx_dropout_layers = nets[0].module.get_alignment_layer_indices()
 
     # check if alignment has the right length (ie number of layers) (otherwise can't make assumptions about where the classification layer is)
     assert all(
@@ -525,21 +525,21 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
 
                 # get output with targeted dropout
                 out_high = [
-                    net.forward_eigenvector_dropout(
+                    net.module.forward_eigenvector_dropout(
                         images, evals, evecs, [drop[idx, :] for drop in drop_high], drop_layer
                     )[0]
                     for idx, (net, evals, evecs) in enumerate(zip(nets, drop_evals, drop_evecs))
                 ]
 
                 out_low = [
-                    net.forward_eigenvector_dropout(
+                    net.module.forward_eigenvector_dropout(
                         images, evals, evecs, [drop[idx, :] for drop in drop_low], drop_layer
                     )[0]
                     for idx, (net, evals, evecs) in enumerate(zip(nets, drop_evals, drop_evecs))
                 ]
 
                 out_rand = [
-                    net.forward_eigenvector_dropout(
+                    net.module.forward_eigenvector_dropout(
                         images, evals, evecs, [drop[idx, :] for drop in drop_rand], drop_layer
                     )[0]
                     for idx, (net, evals, evecs) in enumerate(zip(nets, drop_evals, drop_evecs))
