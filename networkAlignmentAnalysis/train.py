@@ -122,7 +122,7 @@ def train(nets, optimizers, dataset, **parameters):
                     # Measure alignment if requested
                     results["alignment"].append(
                         [
-                            net.measure_alignment(images, precomputed=True, method="alignment")
+                            net.module.measure_alignment(images, precomputed=True, method="alignment")
                             for net in nets
                         ]
                     )
@@ -131,7 +131,7 @@ def train(nets, optimizers, dataset, **parameters):
                     # Measure change in weights if requested
                     results["delta_weights"].append(
                         [
-                            net.compare_weights(init_weight)
+                            net.module.compare_weights(init_weight)
                             for net, init_weight in zip(nets, results["init_weights"])
                         ]
                     )
@@ -233,7 +233,7 @@ def test(nets, dataset, **parameters):
         if measure_alignment:
             alignment.append(
                 [
-                    net.measure_alignment(images, precomputed=True, method="alignment")
+                    net.module.measure_alignment(images, precomputed=True, method="alignment")
                     for net in nets
                 ]
             )
@@ -307,7 +307,7 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
         nets = [nets]
 
     # get index to each alignment layer
-    idx_dropout_layers = nets[0].get_alignment_layer_indices()
+    idx_dropout_layers = nets[0].module.get_alignment_layer_indices()
 
     # get alignment of networks if not provided
     if alignment is None:
@@ -319,7 +319,7 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     ), "the number of layers in **alignment** doesn't correspond to the number of alignment layers"
 
     # don't dropout classification layer if included as an alignment layer
-    classification_layer = nets[0].num_layers(all=True) - 1  # index to last layer in network
+    classification_layer = nets[0].module.num_layers(all=True) - 1  # index to last layer in network
     if classification_layer in idx_dropout_layers:
         idx_dropout_layers.pop(-1)
         alignment.pop(-1)
@@ -374,19 +374,19 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
 
                 # get output with targeted dropout
                 out_high = [
-                    net.forward_targeted_dropout(
+                    net.module.forward_targeted_dropout(
                         images, [drop[idx, :] for drop in drop_high], drop_layer
                     )[0]
                     for idx, net in enumerate(nets)
                 ]
                 out_low = [
-                    net.forward_targeted_dropout(
+                    net.module.forward_targeted_dropout(
                         images, [drop[idx, :] for drop in drop_low], drop_layer
                     )[0]
                     for idx, net in enumerate(nets)
                 ]
                 out_rand = [
-                    net.forward_targeted_dropout(
+                    net.module.forward_targeted_dropout(
                         images, [drop[idx, :] for drop in drop_rand], drop_layer
                     )[0]
                     for idx, net in enumerate(nets)
