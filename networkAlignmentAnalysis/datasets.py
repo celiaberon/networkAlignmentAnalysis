@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torchvision
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torchvision.transforms import v2 as transforms
 
@@ -294,7 +295,7 @@ def get_dataset(
         raise ValueError(f"Dataset ({dataset_name}) is not in DATASET_REGISTRY")
     dataset = DATASET_REGISTRY[dataset_name]
     if build:
-        if isinstance(transform_parameters, AlignmentNetwork):
+        if isinstance(transform_parameters, AlignmentNetwork) or isinstance(transform_parameters, DDP):
             # Can use an AlignmentNetwork instance to automatically retrieve transform parameters
             transform_parameters = transform_parameters.get_transform_parameters(dataset_name)
         else:

@@ -171,6 +171,7 @@ def main():
     loader_parameters = dict(
         batch_size=args.batch_size,
         num_workers=int(os.environ["SLURM_CPUS_PER_TASK"]),
+        distributed=world_size > 1,
     )
 
     if world_size > 1:
@@ -186,7 +187,7 @@ def main():
     dataset_name = args.dataset
     net = get_model(model_name, build=True, dataset=dataset_name)
     dataset = create_dataset(
-        dataset_name, net, distributed=world_size > 1, loader_parameters=loader_parameters
+        dataset_name, net, loader_parameters=loader_parameters
     )
 
     model = net.to(local_rank)
