@@ -297,7 +297,7 @@ def get_dataset(
     if build:
         if isinstance(transform_parameters, AlignmentNetwork) or isinstance(transform_parameters, DDP):
             # Can use an AlignmentNetwork instance to automatically retrieve transform parameters
-            transform_parameters = transform_parameters.get_transform_parameters(dataset_name)
+            transform_parameters = transform_parameters.module.get_transform_parameters(dataset_name)
         else:
             if not isinstance(transform_parameters, dict):
                 raise TypeError("transform_parameters must be a dictionary or an AlignmentNetwork")
