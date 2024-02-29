@@ -1,11 +1,17 @@
 # Saved files
 *.pkl
+slurm-*.out
+*.pt
+jobs/*
 
 # VSCODE
 .vscode/
 
 # WANDB
 wandb/
+
+# general ignore
+ignore/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
