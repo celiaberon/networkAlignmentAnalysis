@@ -15,7 +15,7 @@ REQUIRED_PROPERTIES = ["dataset_path", "dataset_constructor", "loss_function"]
 
 
 def default_loader_parameters(
-    distributed,
+    distributed=False,
     batch_size=1024,
     num_workers=2,
     shuffle=True,
@@ -66,7 +66,7 @@ class DataSet(ABC):
 
         # define the dataloader parameters
         self.dataloader_parameters = default_loader_parameters(
-            distributed, **loader_parameters
+            **loader_parameters
         )  # get dataloader parameters
 
         # load the dataset and create the dataloaders

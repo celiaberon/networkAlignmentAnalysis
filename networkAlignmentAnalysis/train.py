@@ -1,13 +1,13 @@
+import time
 from copy import copy, deepcopy
-from tqdm import tqdm
+
 import torch
-from networkAlignmentAnalysis.utils import (
-    transpose_list,
-    condense_values,
-    test_nets,
-    train_nets,
-    save_checkpoint,
-)
+import torch.distributed as dist
+from tqdm import tqdm
+
+from networkAlignmentAnalysis.utils import (condense_values, save_checkpoint,
+                                            test_nets, train_nets,
+                                            transpose_list)
 
 
 @train_nets
@@ -81,10 +81,24 @@ def train(nets, optimizers, dataset, **parameters):
 
     # --- training loop ---
     for epoch in tqdm(range(num_complete, parameters["num_epochs"]), desc="training epoch"):
+
+        if dataset.distributed:
+            if use_train:
+                dataset.train_sampler.set_epoch(epoch)
+            else:
+                dataset.test_sampler.set_epoch(epoch)
+
+        if dist.get_rank() == 0:
+            first_batch_timer = time.time()
+
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
-            images, labels = dataset.unwrap_batch(batch)
+            images, labels = dataset.unwrap_batch(batch, device=dataset.device)
 
+            if dist.get_rank() == 0 and idx == 0:
+                print(
+                    f"Train-- epoch {epoch}, rank {dist.get_rank()}, first batch loaded in {time.time() - first_batch_timer} seconds."
+                )
             # Zero the gradients
             for opt in optimizers:
                 opt.zero_grad()

@@ -598,11 +598,9 @@ def load_checkpoints(nets, optimizers, device, path):
 
 def gather_dist_metric(local_metric, grp_metric):
 
-
     if dist.get_rank()==0:
         # Gather data tensors onto process 0.
         dist.gather(local_metric, grp_metric, dst=0)  
     else:
         # Just send data from other processes.
         dist.gather(local_metric, dst=0)  
-

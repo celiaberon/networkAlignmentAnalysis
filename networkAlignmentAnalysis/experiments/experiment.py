@@ -3,11 +3,15 @@ from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
+from socket import gethostname
 from typing import Dict, List, Tuple
 
 import torch
-import wandb
+import torch.distributed as dist
 from matplotlib import pyplot as plt
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+import wandb
 
 from .. import files
 from ..datasets import get_dataset
@@ -24,6 +28,10 @@ class Experiment(ABC):
             self.configure_wandb()
         )  # Create a wandb run object (or None depending on args.use_wandb)
         self.device = self.args.device
+        self.loader_parameters = {
+            'batch_size': self.args.batch_size
+        }
+        self.setup_ddp()  # Configure experiment for distributed training if appropriate
 
     def report(self, init=False, args=False, meta_args=False) -> None:
         """Method for programmatically reporting details about experiment"""
@@ -331,9 +339,47 @@ class Experiment(ABC):
             self.args.dataset,
             build=True,
             transform_parameters=transform_parameters,
-            loader_parameters={"batch_size": self.args.batch_size},
-            device=self.args.device,
+            loader_parameters=self.loader_parameters,
+            device=self.device,
         )
+    
+    def setup_ddp(self, verbose=True):
+
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        self.distributed = world_size > 1
+        if not self.distributed:
+            if verbose: print('Not using distributed training')
+            return None
+        rank = int(os.environ["SLURM_PROCID"])  # absolute rank across all nodes * gpus_per_node
+        gpus_per_node = int(os.environ["SLURM_GPUS_ON_NODE"])
+        assert gpus_per_node == torch.cuda.device_count()
+
+        if verbose:
+            print(
+                f"Hello from rank {rank} of {world_size} on {gethostname()} where there are"
+                f" {gpus_per_node} allocated GPUs per node.",
+                flush=True,
+            )
+
+        # Update num_workers for dataloader if using distributed training.
+        self.loader_parameters['num_workers'] = int(os.environ["SLURM_CPUS_PER_TASK"])
+        self.loader_parameters['distributed'] = self.distributed
+
+        # Initialize the process group
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+        if verbose and (rank == 0):
+            print(f"Group initialized? {dist.is_initialized()}", flush=True)
+
+        # Set a local rank as process id within node.
+        local_rank = rank - gpus_per_node * (rank // gpus_per_node)
+        self.device = local_rank
+        torch.cuda.set_device(local_rank)
+        if verbose:
+            print(f"host: {gethostname()}, rank: {rank}, local_rank: {local_rank}")
+
+    def wrap_ddp(self, nets):
+        return [DDP(net, device_ids=[self.device]) for net in nets]
 
     def plot_ready(self, name):
         """standard method for saving and showing plot when it's ready"""

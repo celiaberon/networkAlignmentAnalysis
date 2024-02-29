@@ -1,8 +1,10 @@
 import os
-from tqdm import tqdm
+
 import torch
+from tqdm import tqdm
+
 from . import train
-from .utils import load_checkpoints, test_nets, transpose_list, fgsm_attack
+from .utils import fgsm_attack, load_checkpoints, test_nets, transpose_list
 
 
 def train_networks(exp, nets, optimizers, dataset, **special_parameters):
@@ -22,8 +24,10 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
 
     if exp.args.use_prev & os.path.isfile(exp.get_checkpoint_path()):
         nets, optimizers, results = load_checkpoints(
-            nets, optimizers, exp.args.device, exp.get_checkpoint_path()
+            nets, optimizers, exp.device, exp.get_checkpoint_path()
         )
+        if exp.distributed:
+            nets = exp.wrap_ddp(nets)
         for net in nets:
             net.train()
 
@@ -32,7 +36,7 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
         print("loaded networks from previous checkpoint")
 
     if exp.args.save_ckpts:
-        parameters["save_checkpoints"] = (True, 1, exp.get_checkpoint_path(), exp.args.device)
+        parameters["save_checkpoints"] = (True, 1, exp.get_checkpoint_path(), exp.device)
 
     print("training networks...")
     train_results = train.train(nets, optimizers, dataset, **parameters)
