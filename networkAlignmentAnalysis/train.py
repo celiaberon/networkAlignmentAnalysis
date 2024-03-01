@@ -58,6 +58,7 @@ def train(nets, optimizers, dataset, **parameters):
             "accuracy": torch.zeros((num_steps, num_nets)),
         }
 
+        print('dataset is distributed:', dataset.distributed)
         # measure alignment throughout training
         if measure_alignment:
             results["alignment"] = []
@@ -127,6 +128,8 @@ def train(nets, optimizers, dataset, **parameters):
                 [dataset.measure_accuracy(output, labels) for output in outputs]
             )
 
+            # Put accuracy reduce here. Assume loss done automatically?
+
             if idx % measure_frequency == 0:
                 if measure_alignment:
                     # Measure alignment if requested
@@ -146,16 +149,14 @@ def train(nets, optimizers, dataset, **parameters):
                         ]
                     )
 
-            if run is not None:
+            # Log run with WandB, but only from main process if using distributed training.
+            if (run is not None) and ((not dataset.distributed) or dist.get_rank() == 0):
                 run.log(
                     {f"losses/loss-{ii}": l.item() for ii, l in enumerate(loss)}
                     | {
                         f"accuracies/accuracy-{ii}": dataset.measure_accuracy(output, labels)
                         for ii, output in enumerate(outputs)
                     }
-                    # {f'alignments/alignment-{ii}': alignment for ii, alignment in enumerate(results['alignment'][-1])}
-                    | {"batch": cidx}
-                )
 
         if manual_shape:
             # only do it at the end of #=manual_frequency epochs (but not last)
@@ -184,6 +185,10 @@ def train(nets, optimizers, dataset, **parameters):
                 results | {"prms": parameters, "epoch": epoch, "device": dev},
                 path_ckpt,
             )
+
+    if run is not None:
+        run.log({f'alignments-{dataset.name}/layer{ilayer}/alignment-{inet}': alignment for ilayer, alignment in enumerate(results['alignment'][-1]) for inet in alignment}
+                )
 
     # condense optional analyses
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
