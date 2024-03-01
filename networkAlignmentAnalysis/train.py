@@ -64,7 +64,10 @@ def train(nets, optimizers, dataset, **parameters):
             if dataset.distributed:
                 alignment_dims = get_alignment_dims(nets, dataset, parameters['num_epochs'],
                                                     use_train=use_train)
-                full_alignment = [torch.zeros(alignment_dims, device=dataset.device) for proc in dist.get_world_size()]
+                print(f'expected alignment dimensions are: {alignment_dims}')
+                full_alignment = [torch.zeros(alignment_dims, device=dataset.device)
+                                  for proc in dist.get_world_size()]
+                print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
 
         # measure weight norm throughout training
         if measure_delta_weights:
@@ -103,7 +106,8 @@ def train(nets, optimizers, dataset, **parameters):
 
             if dataset.distributed and dist.get_rank() == 0 and idx == 0:
                 print(
-                    f"Train-- epoch {epoch}, rank {dist.get_rank()}, first batch loaded in {time.time() - first_batch_timer} seconds."
+                    f"Train-- epoch {epoch}, rank {dist.get_rank()}, first batch loaded in ",
+                    f"{time.time() - first_batch_timer} seconds."
                 )
             # Zero the gradients
             for opt in optimizers:
