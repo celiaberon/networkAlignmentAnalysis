@@ -5,9 +5,11 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from networkAlignmentAnalysis.utils import (condense_values, save_checkpoint,
-                                            test_nets, train_nets,
-                                            transpose_list)
+from networkAlignmentAnalysis.utils import (condense_values,
+                                            gather_dist_metric,
+                                            get_alignment_dims,
+                                            save_checkpoint, test_nets,
+                                            train_nets, transpose_list)
 
 
 @train_nets
@@ -59,6 +61,10 @@ def train(nets, optimizers, dataset, **parameters):
         # measure alignment throughout training
         if measure_alignment:
             results["alignment"] = []
+            if dataset.distributed:
+                alignment_dims = get_alignment_dims(nets, dataset, parameters['num_epochs'],
+                                                    use_train=use_train)
+                full_alignment = [torch.zeros(alignment_dims, device=dataset.device) for proc in dist.get_world_size()]
 
         # measure weight norm throughout training
         if measure_delta_weights:
@@ -88,14 +94,14 @@ def train(nets, optimizers, dataset, **parameters):
             else:
                 dataset.test_sampler.set_epoch(epoch)
 
-        if dist.get_rank() == 0:
+        if dataset.distributed and (dist.get_rank() == 0):
             first_batch_timer = time.time()
 
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
             images, labels = dataset.unwrap_batch(batch, device=dataset.device)
 
-            if dist.get_rank() == 0 and idx == 0:
+            if dataset.distributed and dist.get_rank() == 0 and idx == 0:
                 print(
                     f"Train-- epoch {epoch}, rank {dist.get_rank()}, first batch loaded in {time.time() - first_batch_timer} seconds."
                 )
@@ -180,6 +186,12 @@ def train(nets, optimizers, dataset, **parameters):
         if k not in results.keys():
             continue
         results[k] = condense_values(transpose_list(results[k]))
+
+    if measure_alignment and dataset.distributed:
+        gather_dist_metric(results['alignment'], full_alignment)
+        if dist.get_rank() == 0:
+            [t.to(dataset.device) for t in full_alignment]  # move all tensors to main process
+            full_alignment = torch.stack(full_alignment)
 
     return results
 
