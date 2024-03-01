@@ -188,7 +188,10 @@ def train(nets, optimizers, dataset, **parameters):
             )
 
     if run is not None:
-        run.log({f'alignments-{dataset.name}/layer{ilayer}/alignment-{inet}': alignment for ilayer, alignment in enumerate(results['alignment'][-1]) for inet in alignment}
+        run.log({
+            f'alignments-{dataset.__class__.__name__}/layer{ilayer}/alignment-{inet}': alignment
+                 for ilayer, alignment in enumerate(results['alignment'])
+                 for inet in range(len(alignment))}
                 )
 
     # condense optional analyses
@@ -198,9 +201,10 @@ def train(nets, optimizers, dataset, **parameters):
         results[k] = condense_values(transpose_list(results[k]))
 
     if measure_alignment and dataset.distributed:
-        gather_dist_metric(results['alignment'], full_alignment)
+        alignment_tensors = [torch.tensor(layer, device=dataset.device) for layer in results['alignment']]
+        gather_dist_metric(alignment_tensors, full_alignment)
         if dist.get_rank() == 0:
-            [t.to(dataset.device) for t in full_alignment]  # move all tensors to main process
+            [proc_align.to(dataset.device) for layer in full_alignment for proc_align in layer]  # move all tensors to main process
             full_alignment = torch.stack(full_alignment)
 
     return results
