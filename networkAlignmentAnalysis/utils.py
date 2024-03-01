@@ -601,7 +601,7 @@ def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
     #TODO: generalize this better to include conv layers
     dataloader = dataset.train_loader if use_train else dataset.test_loader
     dims = [(len(nets), len(dataloader) * num_epochs, layer.out_features)
-            for layer in nets[0].get_alignment_layers()]
+            for layer in nets[0].module.get_alignment_layers()]
 
     return dims
 

@@ -66,14 +66,14 @@ def train(nets, optimizers, dataset, **parameters):
                 alignment_dims = get_alignment_dims(nets, dataset, parameters['num_epochs'],
                                                     use_train=use_train)
                 print(f'expected alignment dimensions are: {alignment_dims}')
-                full_alignment = [torch.zeros(alignment_dims, device=dataset.device)
-                                  for proc in dist.get_world_size()]
+                full_alignment = [torch.zeros(alignment_dims, dtype=torch.float, device=dataset.device)
+                                  for proc in range(dist.get_world_size())]
                 print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
 
         # measure weight norm throughout training
         if measure_delta_weights:
             results["delta_weights"] = []
-            results["init_weights"] = [net.get_alignment_weights() for net in nets]
+            results["init_weights"] = [net.module.get_alignment_weights() for net in nets]
 
     # If loaded from checkpoint but running more epochs than initialized for.
     elif results["loss"].shape[0] < num_steps:
@@ -156,7 +156,7 @@ def train(nets, optimizers, dataset, **parameters):
                     | {
                         f"accuracies/accuracy-{ii}": dataset.measure_accuracy(output, labels)
                         for ii, output in enumerate(outputs)
-                    }
+                    })
 
         if manual_shape:
             # only do it at the end of #=manual_frequency epochs (but not last)
