@@ -41,7 +41,6 @@ class DataSet(ABC):
     def __init__(
         self,
         device=None,
-        distributed=False,
         dataset_parameters={},
         transform_parameters={},
         loader_parameters={},
@@ -54,7 +53,7 @@ class DataSet(ABC):
         self.device = (
             device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        self.distributed = distributed
+        self.distributed = loader_parameters.get('distributed', False)
 
         # define extra transform (should be a callable method or None) for any transformations that
         # can't go in the torchvision.transforms.Compose(...), hopefully this won't be needed later
