@@ -66,7 +66,8 @@ def train(nets, optimizers, dataset, **parameters):
                 alignment_dims = get_alignment_dims(nets, dataset, parameters['num_epochs'],
                                                     use_train=use_train)
                 print(f'expected alignment dimensions are: {alignment_dims}')
-                full_alignment = [torch.zeros(alignment_dims, dtype=torch.float, device=dataset.device)
+                full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
+                                   for layer_dims in alignment_dims]
                                   for proc in range(dist.get_world_size())]
                 print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
 
