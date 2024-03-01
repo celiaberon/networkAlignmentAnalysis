@@ -611,7 +611,10 @@ def gather_dist_metric(local_metric, grp_metric):
 
     if dist.get_rank()==0:
         # Gather data tensors onto process 0.
-        dist.gather(local_metric, grp_metric, dst=0)  
+        # dist.gather(local_metric, grp_metric, dst=0)  
+        [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
+
     else:
         # Just send data from other processes.
-        dist.gather(local_metric, dst=0)  
+        # dist.gather(local_metric, dst=0)  
+        [dist.gather(l_, dst=0) for l_ in local_metric]
