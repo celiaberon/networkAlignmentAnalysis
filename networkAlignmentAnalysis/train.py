@@ -58,7 +58,6 @@ def train(nets, optimizers, dataset, **parameters):
             "accuracy": torch.zeros((num_steps, num_nets)),
         }
 
-        print('dataset is distributed:', dataset.distributed)
         # measure alignment throughout training
         if measure_alignment:
             results["alignment"] = []
@@ -187,13 +186,6 @@ def train(nets, optimizers, dataset, **parameters):
                 path_ckpt,
             )
 
-    #if run is not None:
-    #    run.log({
-    #        f'alignments-{dataset.__class__.__name__}/layer{ilayer}/alignment-{inet}': alignment
-    #             for ilayer, alignment in enumerate(results['alignment'])
-    #             for inet in range(len(alignment))}
-    #            )
-
     # condense optional analyses
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
         if k not in results.keys():
@@ -241,6 +233,13 @@ def test(nets, dataset, **parameters):
     # measure alignment throughout training
     if measure_alignment:
         alignment = []
+        if dataset.distributed:
+            alignment_dims = get_alignment_dims(nets, dataset, 1, use_train=False)
+            print(f'expected alignment dimensions are: {alignment_dims}')
+            full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
+                                for proc in range(dist.get_world_size())]
+                                for layer_dims in alignment_dims]
+            print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
 
     for batch in tqdm(dataloader):
         images, labels = dataset.unwrap_batch(batch)
@@ -272,6 +271,14 @@ def test(nets, dataset, **parameters):
 
     if measure_alignment:
         results["alignment"] = condense_values(transpose_list(alignment))
+
+    if measure_alignment and dataset.distributed:
+        alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
+        gather_dist_metric(alignment_local, full_alignment)
+        if dist.get_rank() == 0:
+            # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
+            # Order shouldn't matter for inference?
+            results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
     if run is not None:
         run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
