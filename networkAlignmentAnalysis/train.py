@@ -187,12 +187,12 @@ def train(nets, optimizers, dataset, **parameters):
                 path_ckpt,
             )
 
-    if run is not None:
-        run.log({
-            f'alignments-{dataset.__class__.__name__}/layer{ilayer}/alignment-{inet}': alignment
-                 for ilayer, alignment in enumerate(results['alignment'])
-                 for inet in range(len(alignment))}
-                )
+    #if run is not None:
+    #    run.log({
+    #        f'alignments-{dataset.__class__.__name__}/layer{ilayer}/alignment-{inet}': alignment
+    #             for ilayer, alignment in enumerate(results['alignment'])
+    #             for inet in range(len(alignment))}
+    #            )
 
     # condense optional analyses
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
@@ -201,11 +201,12 @@ def train(nets, optimizers, dataset, **parameters):
         results[k] = condense_values(transpose_list(results[k]))
 
     if measure_alignment and dataset.distributed:
-        alignment_tensors = [torch.tensor(layer, device=dataset.device) for layer in results['alignment']]
-        gather_dist_metric(alignment_tensors, full_alignment)
+        alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
+        gather_dist_metric(alignment_local, full_alignment)
         if dist.get_rank() == 0:
-            [proc_align.to(dataset.device) for layer in full_alignment for proc_align in layer]  # move all tensors to main process
-            full_alignment = torch.stack(full_alignment)
+            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
+            # TODO: permute steps to match training order.
+            results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
     return results
 
