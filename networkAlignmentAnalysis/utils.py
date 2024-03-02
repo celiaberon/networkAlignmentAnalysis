@@ -598,6 +598,11 @@ def load_checkpoints(nets, optimizers, device, path):
 
 def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
 
+    """
+    Calcute expected dimensions of alignment across a network after a full pass (training or
+    testing).
+    """
+
     #TODO: generalize this better to include conv layers
     dataloader = dataset.train_loader if use_train else dataset.test_loader
     dims = [(len(nets), len(dataloader) * num_epochs, layer.out_features)
@@ -606,15 +611,33 @@ def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
     return dims
 
 
-
 def gather_dist_metric(local_metric, grp_metric):
 
+    """
+    Gather metrics calculated from distributed processes onto main process.
+    local_metric should be a list of tensors, which will be identically sized across processes.
+    grp_metric starts as a list of tensors (of zeros) of size [local_metric] * n_processes.
+
+    dist.gather() returns filled grp_metric on main process (rank 0).
+    Example: for alignment, each process sends local_metric with alignment as:
+         [nnets, nsteps, outfeatures] x layer
+    grp_metric ends up with:
+         [[nnets, nsteps, outfeatures] x process] x layer
+         (later becomes: [nnets, nsteps x n_processes, outfeatures] x layer)
+    """
     if dist.get_rank()==0:
         # Gather data tensors onto process 0.
-        # dist.gather(local_metric, grp_metric, dst=0)  
         [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
 
     else:
         # Just send data from other processes.
-        # dist.gather(local_metric, dst=0)  
         [dist.gather(l_, dst=0) for l_ in local_metric]
+
+
+def permute_distributed_metric(grp_metric, cat_dim):
+
+    """
+    Placeholder for function to permute grp_metric along cat_dim using world size to maintain
+    correct order of metric according to effective minibatches across processes. 
+    """
+    pass
