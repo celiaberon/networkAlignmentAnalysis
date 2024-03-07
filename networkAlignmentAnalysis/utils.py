@@ -627,12 +627,17 @@ def gather_dist_metric(local_metric, grp_metric):
     """
     if dist.get_rank()==0:
         # Gather data tensors onto process 0.
-        [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
+        # [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
+        [[[dist.gather(l_layer, g_layer, dst=0) for l_layer, g_layer in zip(l_net, g_net)]
+                                                for l_net, g_net in zip(l_proc, g_proc)] 
+                                                for l_proc, g_proc in zip(local_metric, grp_metric)]
 
     else:
         # Just send data from other processes.
-        [dist.gather(l_, dst=0) for l_ in local_metric]
-
+        # [dist.gather(l_, dst=0) for l_ in local_metric]
+        [[[dist.gather(l_layer, dst=0) for l_layer in l_net]
+                                        for l_net in l_proc] 
+                                        for l_proc in local_metric]
 
 def permute_distributed_metric(grp_metric, cat_dim):
 
