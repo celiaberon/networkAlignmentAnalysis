@@ -61,14 +61,14 @@ def train(nets, optimizers, dataset, **parameters):
         # measure alignment throughout training
         if measure_alignment:
             results["alignment"] = []
-            if dataset.distributed:
-                alignment_dims = get_alignment_dims(nets, dataset, parameters['num_epochs'],
-                                                    use_train=use_train)
-                print(f'expected alignment dimensions are: {alignment_dims}')
-                full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
-                                  for proc in range(dist.get_world_size())]
-                                  for layer_dims in alignment_dims]
-                print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
+            # if dataset.distributed:
+            #     alignment_dims = get_alignment_dims(nets, dataset, parameters['num_epochs'],
+            #                                         use_train=use_train)
+            #     print(f'expected alignment dimensions are: {alignment_dims}')
+            #     full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
+            #                       for proc in range(dist.get_world_size())]
+            #                       for layer_dims in alignment_dims]
+            #     print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
 
         # measure weight norm throughout training
         if measure_delta_weights:
@@ -133,12 +133,25 @@ def train(nets, optimizers, dataset, **parameters):
             if idx % measure_frequency == 0:
                 if measure_alignment:
                     # Measure alignment if requested
-                    results["alignment"].append(
-                        [
-                            net.module.measure_alignment(images, precomputed=True, method="alignment")
-                            for net in nets
-                        ]
-                    )
+                    alignment = [net.module.measure_alignment(images, precomputed=True, method="alignment")
+                            for net in nets]
+                    
+                    if not dataset.distributed:
+                        results["alignment"].append(alignment)
+                    else:
+                        # [(nlayers, nneurons) x nnets]
+                        grp_alignment = [[[torch.zeros((len(alignment[inet][ilayer])),
+                                                        dtype=torch.float, device=dataset.device)
+                                  for ilayer in range(len(alignment[0]))]
+                                  for inet in range(len(alignment))] 
+                                  for proc in range(dist.get_world_size())]
+                        # alignment = [layer.to(dataset.device) for layer in alignment]
+                        gather_dist_metric(alignment, grp_alignment)
+                        if dist.get_rank() == 0:
+                            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
+                            # TODO: permute steps to match training order.
+                            # results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
+                            results['alignment'].extend(grp_alignment)
 
                 if measure_delta_weights:
                     # Measure change in weights if requested
@@ -186,19 +199,20 @@ def train(nets, optimizers, dataset, **parameters):
                 path_ckpt,
             )
 
+    alignment = results['alignment']
     # condense optional analyses
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
         if k not in results.keys():
             continue
         results[k] = condense_values(transpose_list(results[k]))
 
-    if measure_alignment and dataset.distributed:
-        alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
-        gather_dist_metric(alignment_local, full_alignment)
-        if dist.get_rank() == 0:
-            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
-            # TODO: permute steps to match training order.
-            results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
+    # if measure_alignment and dataset.distributed:
+    #     alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
+    #     gather_dist_metric(alignment_local, full_alignment)
+    #     if dist.get_rank() == 0:
+    #         # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
+    #         # TODO: permute steps to match training order.
+    #         results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
     return results
 
