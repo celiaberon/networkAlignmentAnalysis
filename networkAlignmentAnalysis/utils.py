@@ -627,22 +627,29 @@ def gather_dist_metric(local_metric, grp_metric):
     """
     if dist.get_rank()==0:
         # Gather data tensors onto process 0.
-        # [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
-        [[[dist.gather(l_layer, g_layer, dst=0) for l_layer, g_layer in zip(l_net, g_net)]
-                                                for l_net, g_net in zip(l_proc, g_proc)] 
-                                                for l_proc, g_proc in zip(local_metric, grp_metric)]
+        [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
+        # [[[dist.gather(l_layer, g_layer, dst=0) for l_layer, g_layer in zip(l_net, g_net)]
+        #                                         for l_net, g_net in zip(l_proc, g_proc)] 
+        #                                         for l_proc, g_proc in zip(local_metric, grp_metric)]
 
     else:
         # Just send data from other processes.
-        # [dist.gather(l_, dst=0) for l_ in local_metric]
-        [[[dist.gather(l_layer, dst=0) for l_layer in l_net]
-                                        for l_net in l_proc] 
-                                        for l_proc in local_metric]
+        [dist.gather(l_, dst=0) for l_ in local_metric]
+        # [[[dist.gather(l_layer, dst=0) for l_layer in l_net]
+        #                                 for l_net in l_proc] 
+        #                                 for l_proc in local_metric]
 
-def permute_distributed_metric(grp_metric, cat_dim):
+def permute_distributed_metric(grp_metric):
 
     """
     Placeholder for function to permute grp_metric along cat_dim using world size to maintain
     correct order of metric according to effective minibatches across processes. 
     """
-    pass
+
+    n_processes = dist.get_world_size()
+
+    split_interval = len(grp_metric) // n_processes
+    split_list = [grp_metric[int(i):int(i+split_interval)] for i in torch.arange(len(grp_metric))[::split_interval]]
+    permuted_list = [torch.tensor(matched_step) for matched_step in zip(*split_list)]
+
+    return permuted_list
