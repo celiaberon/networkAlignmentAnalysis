@@ -1,11 +1,15 @@
 from warnings import warn
+import zipfile
+import os
 from typing import List
 from contextlib import contextmanager
 from functools import wraps
+from natsort import natsorted
 import numpy as np
 from scipy.linalg import null_space
 from sklearn.decomposition import IncrementalPCA
 import torch
+from gitignore_parser import parse_gitignore
 
 
 # -------------- context managers & decorators --------------
@@ -111,9 +115,7 @@ def get_eval_transform_by_cutoff(cutoff):
     """
 
     def eval_transform(evals):
-        assert torch.all(
-            evals >= 0
-        ), "found negative eigenvalues, doesn't work for 'cutoff' eval_transform"
+        assert torch.all(evals >= 0), "found negative eigenvalues, doesn't work for 'cutoff' eval_transform"
         evals = evals / torch.sum(evals)
         return 1.0 * (evals > cutoff)
 
@@ -334,17 +336,13 @@ def alignment(input, weight, method="alignment"):
         alignment: (num_out, ) torch tensor
             - proportion of variance explained by projection of **input** onto each **weight** vector
     """
-    assert (
-        method == "alignment" or method == "similarity"
-    ), "method must be set to either 'alignment' or 'similarity' (or None, default is alignment)"
+    assert method == "alignment" or method == "similarity", "method must be set to either 'alignment' or 'similarity' (or None, default is alignment)"
     if method == "alignment":
         cc = torch.cov(input.T)
     elif method == "similarity":
         cc = smartcorr(input.T)
     else:
-        raise ValueError(
-            f"did not recognize method ({method}), must be 'alignment' or 'similarity'"
-        )
+        raise ValueError(f"did not recognize method ({method}), must be 'alignment' or 'similarity'")
     # Compute rayleigh quotient
     rq = torch.sum(torch.matmul(weight, cc) * weight, axis=1) / torch.sum(weight * weight, axis=1)
     # proportion of variance explained by a projection of the input onto each weight
@@ -352,20 +350,8 @@ def alignment(input, weight, method="alignment"):
 
 
 def get_maximum_strides(h_input, w_input, layer):
-    h_max = int(
-        np.floor(
-            (h_input + 2 * layer.padding[0] - layer.dilation[0] * (layer.kernel_size[0] - 1) - 1)
-            / layer.stride[0]
-            + 1
-        )
-    )
-    w_max = int(
-        np.floor(
-            (w_input + 2 * layer.padding[1] - layer.dilation[1] * (layer.kernel_size[1] - 1) - 1)
-            / layer.stride[1]
-            + 1
-        )
-    )
+    h_max = int(np.floor((h_input + 2 * layer.padding[0] - layer.dilation[0] * (layer.kernel_size[0] - 1) - 1) / layer.stride[0] + 1))
+    w_max = int(np.floor((w_input + 2 * layer.padding[1] - layer.dilation[1] * (layer.kernel_size[1] - 1) - 1) / layer.stride[1] + 1))
     return h_max, w_max
 
 
@@ -427,10 +413,7 @@ def condense_values(full: List[List[List[torch.Tensor]]]) -> List[torch.Tensor]:
     the tensor should have shape = number of nodes in this layer (also must be the same for each network) (or can be anything as long as consistent across layers)
     """
     num_layers = len(full[0][0])
-    return [
-        torch.stack([value_by_layer(value, layer) for value in full])
-        for layer in range(num_layers)
-    ]
+    return [torch.stack([value_by_layer(value, layer) for value in full]) for layer in range(num_layers)]
 
 
 def transpose_list(list_of_lists):
@@ -561,9 +544,7 @@ def save_checkpoint(nets, optimizers, results, path):
     Method for saving checkpoints for networks throughout training.
     """
     multi_model_ckpt = {f"model_state_dict_{i}": net.state_dict() for i, net in enumerate(nets)}
-    multi_optimizer_ckpt = {
-        f"optimizer_state_dict_{i}": opt.state_dict() for i, opt in enumerate(optimizers)
-    }
+    multi_optimizer_ckpt = {f"optimizer_state_dict_{i}": opt.state_dict() for i, opt in enumerate(optimizers)}
     checkpoint = results | multi_model_ckpt | multi_optimizer_ckpt
     torch.save(checkpoint, path)
 
@@ -579,8 +560,8 @@ def load_checkpoints(nets, optimizers, device, path):
     elif device == "cuda":
         checkpoint = torch.load(path)
 
-    net_ids = sorted([key for key in checkpoint if key.startswith("model_state_dict")])
-    opt_ids = sorted([key for key in checkpoint if key.startswith("optimizer_state_dict")])
+    net_ids = natsorted([key for key in checkpoint if key.startswith("model_state_dict")])
+    opt_ids = natsorted([key for key in checkpoint if key.startswith("optimizer_state_dict")])
     assert all(
         [oi.split("_")[-1] == ni.split("_")[-1] for oi, ni in zip(opt_ids, net_ids)]
     ), "nets and optimizers cannot be matched up from checkpoint"
@@ -592,3 +573,44 @@ def load_checkpoints(nets, optimizers, device, path):
         [net.to(device) for net in nets]
 
     return nets, optimizers, checkpoint
+
+
+def match_git(path):
+    """simple method for determining if a path is a git-related file or directory"""
+    if ".git" in path:
+        return True
+    return False
+
+
+def compress_directory(output_path, directory_path=None):
+    """send an entire directory to a zip file at output_path, using .gitignore and ignoring .git files"""
+    if directory_path is None:
+        # relative to utils -- this is the main repo path
+        directory_path = os.path.dirname(os.path.abspath(__file__)) + "/.."
+
+    # Parse .gitignore file
+    gitignore_path = os.path.join(directory_path, ".gitignore")
+    matches = parse_gitignore(gitignore_path)
+
+    # Prepare list for copying files
+    files_to_copy = []
+    archive_names = []
+    for dirpath, dirnames, files in os.walk(directory_path):
+        if matches(dirpath) or match_git(dirpath):
+            # clear any files from within this path
+            dirnames[:] = []
+        else:
+            # Filter files based on .gitignore rules (and don't save any .git files)
+            keep_files = [f for f in files if not matches(f) and not match_git(f)]
+            # Make full path
+            full_files = [os.path.join(dirpath, f) for f in keep_files]
+            for file in full_files:
+                # Add file to the copy list
+                files_to_copy.append(file)
+                archive_names.append(os.path.relpath(file, directory_path))
+
+    # create zip file
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # go through directory
+        for file, name in zip(files_to_copy, archive_names):
+            zipf.write(file, arcname=name)
