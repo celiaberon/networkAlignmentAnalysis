@@ -211,7 +211,7 @@ def train(nets, optimizers, dataset, **parameters):
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
         if k not in results.keys():
             continue
-        if k=='alignment' & dataset.distributed:
+        if (k == 'alignment') and dataset.distributed:
             continue
         results[k] = condense_values(transpose_list(results[k]))
 
