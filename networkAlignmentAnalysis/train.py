@@ -70,7 +70,7 @@ def train(nets, optimizers, dataset, **parameters):
                 full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
                                   for proc in range(dist.get_world_size())]
                                   for layer_dims in alignment_dims]
-                alignment_reference = torch.clone(full_alignment)
+                alignment_reference = [[torch.clone(proc) for proc in layer_dims] for layer_dims in full_alignment]
                 print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
 
         # measure weight norm throughout training
@@ -105,8 +105,9 @@ def train(nets, optimizers, dataset, **parameters):
                 first_batch_timer = time.time()
 
             if combine_by_epoch:
+                # Reset local and group metrics every epoch.
                 local_alignment=[]
-                full_alignment = torch.clone(alignment_reference)  # reset grp_metric every epoch
+                full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]  
 
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
