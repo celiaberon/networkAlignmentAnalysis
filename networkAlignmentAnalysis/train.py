@@ -108,9 +108,9 @@ def train(nets, optimizers, dataset, **parameters):
                 # Reset local and group metrics every epoch.
                 local_alignment=[]
                 full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]
-                print('outer: ', len(full_alignment),
-                      '\n1st: ', len(full_alignment[0]),
-                      '\n2nd: ', len(full_alignment[0][0]))
+                print('outer (num layers): ', len(full_alignment),
+                      '\n1st (num processes): ', len(full_alignment[0]),
+                      '\n2nd (num reps): ', len(full_alignment[0][0]))
 
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
@@ -191,9 +191,9 @@ def train(nets, optimizers, dataset, **parameters):
                     net.shape_eigenfeatures(manual_layers, eigenvalues, eigenvectors, transform)
 
         if dataset.distributed and combine_by_epoch:
-            print(f'local initial {epoch}: {len(local_alignment)}')
+            print(f'local initial {epoch} (num steps): {len(local_alignment)}')
             local_alignment = condense_values(transpose_list(local_alignment))
-            print(f'local post {epoch}: {len(local_alignment)}')
+            print(f'local post {epoch} (num layers): {len(local_alignment)}')
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_dist_metric(local_alignment, full_alignment)
             if dist.get_rank() == 0:
@@ -202,7 +202,7 @@ def train(nets, optimizers, dataset, **parameters):
                 full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
                 # full_alignment = permute_distributed_metric(full_alignment)
                 results['alignment'].append(full_alignment)
-                print(f'agg {epoch}: {len(results["alignment"])}')
+                print(f'agg {epoch} (num epochs): {len(results["alignment"])}')
                 
 
         if save_ckpt & (epoch % freq_ckpt == 0):
@@ -225,7 +225,9 @@ def train(nets, optimizers, dataset, **parameters):
         if combine_by_epoch:
             # Concatenate along step axis for each layer.
             if dist.get_rank() == 0:
-                results['alignment'] = [torch.cat(ilayer, axis=1).shape for ilayer in zip(*results['alignment'])]        
+                results['alignment'] = [torch.cat(ilayer, axis=1).shape for ilayer in zip(*results['alignment'])]
+                print(f'post agg: {len(results["alignment"])}')
+                print(f'post agg sample: {results["alignment"][0][0][0][0]}')        
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
