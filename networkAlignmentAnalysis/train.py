@@ -190,10 +190,10 @@ def train(nets, optimizers, dataset, **parameters):
                     eigenvectors = [eigenvectors[idx_to_layer_lookup[ml]] for ml in manual_layers]
                     net.shape_eigenfeatures(manual_layers, eigenvalues, eigenvectors, transform)
 
-        if dataset.distributed & combine_by_epoch:
-            print('local initial ': len(local_alignment))
+        if dataset.distributed and combine_by_epoch:
+            print(f'local initial {epoch}: {len(local_alignment)}')
             local_alignment = condense_values(transpose_list(local_alignment))
-            print('local post ': len(local_alignment))
+            print(f'local post {epoch}: {len(local_alignment)}')
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_dist_metric(local_alignment, full_alignment)
             if dist.get_rank() == 0:
@@ -202,6 +202,7 @@ def train(nets, optimizers, dataset, **parameters):
                 full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
                 # full_alignment = permute_distributed_metric(full_alignment)
                 results['alignment'].append(full_alignment)
+                print(f'agg {epoch}: {len(results["alignment"])}')
                 
 
         if save_ckpt & (epoch % freq_ckpt == 0):
@@ -223,7 +224,8 @@ def train(nets, optimizers, dataset, **parameters):
     if measure_alignment and dataset.distributed:
         if combine_by_epoch:
             # Concatenate along step axis for each layer.
-            results['alignment'] = [torch.cat(ilayer, axis=1).shape for ilayer in zip(*results['alignment'])]
+            if dist.get_rank() == 0:
+                results['alignment'] = [torch.cat(ilayer, axis=1).shape for ilayer in zip(*results['alignment'])]        
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
