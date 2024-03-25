@@ -221,8 +221,6 @@ def train(nets, optimizers, dataset, **parameters):
             # Concatenate along step axis for each layer.
             if dist.get_rank() == 0:
                 results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
-                print(f'post agg: {len(results["alignment"])}')
-                print(f'post agg sample: {results["alignment"][0]}') # MLP: torch.Size([reps, steps x procs, out_features])       
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
@@ -462,13 +460,13 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
 
     if dataset.distributed:
         for drop_type in scores:
-            print(scores[drop_type]['progdrop_loss'][:, 0, 0])
-            scores[drop_type]['progdrop_loss'] = dist.all_reduce(scores[drop_type]['progrdrop_loss'], op=dist.ReduceOp.SUM)
-            print(scores[drop_type]['progdrop_loss'][:, 0, 0])
-            scores[drop_type]['progdrop_acc'] = dist.all_reduce(scores[drop_type]['progrdrop_acc'], op=dist.ReduceOp.SUM)
-            print(num_batches)
+            print(dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
+            scores[drop_type]['progdrop_loss'] = dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
+            print(dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
+            scores[drop_type]['progdrop_acc'] = dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
+            print(dist.get_rank(), num_batches)
             num_batches = dist.all_reduce(torch.tensor(num_batches), op=dist.ReduceOp.SUM)
-            print(num_batches)
+            print(dist.get_rank(), num_batches)
 
 
     results = {
