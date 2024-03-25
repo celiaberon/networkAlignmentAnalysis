@@ -460,12 +460,12 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
 
     if dataset.distributed:
         for drop_type in scores:
-            print(dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
-            scores[drop_type]['progdrop_loss'] = dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
-            print(dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
-            scores[drop_type]['progdrop_acc'] = dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
+            print('progrdrop loss pre agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
+            dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
+            print('progrdrop loss post agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
+            dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
             print(dist.get_rank(), num_batches)
-            num_batches = dist.all_reduce(torch.tensor(num_batches), op=dist.ReduceOp.SUM)
+            dist.all_reduce(torch.tensor(num_batches, device=dataset.device), op=dist.ReduceOp.SUM)
             print(dist.get_rank(), num_batches)
 
 
