@@ -28,7 +28,6 @@ def train(nets, optimizers, dataset, **parameters):
     use_train = parameters.get("train_set", True)
     dataloader = dataset.train_loader if use_train else dataset.test_loader
     num_steps = len(dataset.train_loader) * parameters["num_epochs"]
-    print(len(dataloader), num_steps)
 
     # --- optional W&B logging ---
     run = parameters.get("run")
@@ -108,9 +107,6 @@ def train(nets, optimizers, dataset, **parameters):
                 # Reset local and group metrics every epoch.
                 local_alignment=[]
                 full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]
-                print('outer (num layers): ', len(full_alignment),
-                      '\n1st (num processes): ', len(full_alignment[0]),
-                      '\n2nd (num reps): ', len(full_alignment[0][0]))
 
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
@@ -257,7 +253,6 @@ def test(nets, dataset, **parameters):
     # retrieve requested dataloader from dataset
     use_test = not parameters.get("train_set", False)  # if train_set=True, use_test=False
     dataloader = dataset.test_loader if use_test else dataset.train_loader
-    print(len(dataloader))
 
     # Performance Measurements
     total_loss = [0 for _ in range(num_nets)]
@@ -311,6 +306,9 @@ def test(nets, dataset, **parameters):
             # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
             # Order shouldn't matter for inference except for traceback to eigenfeatures?
             results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
+
+    print(dist.get_rank(), results["loss"])
+    print(dist.get_rank(), results["accuracy"])
 
     if run is not None:
         run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
@@ -457,6 +455,10 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
                     )[0]
                     for idx, net in enumerate(nets)
                 ]
+
+                print('out_high (num nets):', len(out_high))
+                print('out_high 0 (num neurons classifier):', len(out_high[0]))
+                print('out_high 0 (num neurons classifier):', out_high[0].shape)
 
                 # get loss with targeted dropout
                 loss_high = [dataset.measure_loss(out, labels).item() for out in out_high]
