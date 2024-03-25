@@ -289,6 +289,18 @@ def test(nets, dataset, **parameters):
             alignment.append([net.module.measure_alignment(images, precomputed=True, method="alignment")
                     for net in nets])
 
+    if dataset.distributed:
+        # Seems that loss isn't automatically all reduced as expected?
+        print(dist.get_rank(), total_loss[:10])
+        total_loss = torch.tensor(total_loss, device=dataset.device)
+        dist.all_reduce(total_loss, op=dist.ReduceOp.SUM)
+        print(dist.get_rank(), num_correct[:10])
+        num_correct = torch.tensor(num_correct, device=dataset.device)
+        dist.all_reduce(num_correct, op=dist.ReduceOp.SUM)
+        num_batches = torch.tensor(num_batches, device=dataset.device)
+        dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
+        num_batches = num_batches.cpu()
+
     results = {
         "loss": [loss / num_batches for loss in total_loss],
         "accuracy": [correct / num_batches for correct in num_correct],
@@ -460,9 +472,7 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
 
     if dataset.distributed:
         for drop_type in scores:
-            # print('progrdrop loss pre agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
             dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
-            # print('progrdrop loss post agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
             dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
         num_batches = torch.tensor(num_batches, device=dataset.device)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
