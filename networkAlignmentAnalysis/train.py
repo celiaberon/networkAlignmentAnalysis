@@ -399,13 +399,15 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     by_layer = parameters.get("by_layer", False)
     num_layers = len(idx_dropout_layers) if by_layer else 1
 
+    scores = {'high': {},
+              'low': {},
+              'rand': {}
+             }
+
     # preallocate tracker tensors
-    progdrop_loss_high = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_loss_low = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_loss_rand = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_acc_high = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_acc_low = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_acc_rand = torch.zeros((num_nets, num_drops, num_layers))
+    for key in scores:
+        scores[key]['progdrop_loss'] = torch.zeros((num_nets, num_drops, num_layers))
+        scores[key]['progdrop_acc'] = torch.zeros((num_nets, num_drops, num_layers))
 
     # to keep track of how many values have been added
     num_batches = 0
@@ -414,6 +416,7 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     use_train = parameters.get("train_set", False)
     dataloader = dataset.train_loader if use_train else dataset.test_loader
 
+    
     # let dataloader be outer loop to minimize extract / load / transform time
     for batch in tqdm(dataloader):
         images, labels = dataset.unwrap_batch(batch)
@@ -426,58 +429,47 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
             # do drop out for each layer (or across all depending on parameters)
             for layer in range(num_layers):
                 if by_layer:
-                    drop_high, drop_low, drop_rand = (
+                    drop_nodes = (
                         [idx_high[layer]],
                         [idx_low[layer]],
                         [idx_rand[layer]],
                     )
                     drop_layer = [idx_dropout_layers[layer]]
                 else:
-                    drop_high, drop_low, drop_rand = idx_high, idx_low, idx_rand
+                    drop_nodes = (idx_high, idx_low, idx_rand)
                     drop_layer = copy(idx_dropout_layers)
 
-                # get output with targeted dropout
-                out_high = [
-                    net.module.forward_targeted_dropout(
-                        images, [drop[idx, :] for drop in drop_high], drop_layer
-                    )[0]
-                    for idx, net in enumerate(nets)
-                ]
-                out_low = [
-                    net.module.forward_targeted_dropout(
-                        images, [drop[idx, :] for drop in drop_low], drop_layer
-                    )[0]
-                    for idx, net in enumerate(nets)
-                ]
-                out_rand = [
-                    net.module.forward_targeted_dropout(
-                        images, [drop[idx, :] for drop in drop_rand], drop_layer
-                    )[0]
-                    for idx, net in enumerate(nets)
-                ]
 
-                print('out_high (num nets):', len(out_high))
-                print('out_high 0 (num neurons classifier):', len(out_high[0]))
-                print('out_high 0 (num neurons classifier):', out_high[0].shape)
+                for drop_node, drop_type in zip(drop_nodes, scores):
+                    
+                    # get output with targeted dropout (batch_size x out_features)
+                    scores[drop_type]['out'] = [
+                        net.module.forward_targeted_dropout(
+                            images, [drop[idx, :] for drop in drop_node], drop_layer
+                        )[0]
+                        for idx, net in enumerate(nets)
+                    ]
 
-                # get loss with targeted dropout
-                loss_high = [dataset.measure_loss(out, labels).item() for out in out_high]
-                loss_low = [dataset.measure_loss(out, labels).item() for out in out_low]
-                loss_rand = [dataset.measure_loss(out, labels).item() for out in out_rand]
+                    # get loss with targeted dropout (loss_high, loss_low, loss_rand)
+                    scores[drop_type]['loss'] = [dataset.measure_loss(out, labels).item()
+                                                         for out in scores[drop_type]['out']]
 
-                # get accuracy with targeted dropout
-                acc_high = [dataset.measure_accuracy(out, labels) for out in out_high]
-                acc_low = [dataset.measure_accuracy(out, labels) for out in out_low]
-                acc_rand = [dataset.measure_accuracy(out, labels) for out in out_rand]
+                    # get accuracy with targeted dropout
+                    scores[drop_type]['acc'] = [dataset.measure_accuracy(out, labels) for out in scores[drop_type]['out']]
 
-                # add to storage tensors
-                progdrop_loss_high[:, dropidx, layer] += torch.tensor(loss_high)
-                progdrop_loss_low[:, dropidx, layer] += torch.tensor(loss_low)
-                progdrop_loss_rand[:, dropidx, layer] += torch.tensor(loss_rand)
+                    scores[drop_type]['progdrop_loss'][:, dropidx, layer] += torch.tensor(scores[drop_type]['loss'])
+                    scores[drop_type]['progdrop_acc'][:, dropidx, layer] += torch.tensor(scores[drop_type]['acc'])
 
-                progdrop_acc_high[:, dropidx, layer] += torch.tensor(acc_high)
-                progdrop_acc_low[:, dropidx, layer] += torch.tensor(acc_low)
-                progdrop_acc_rand[:, dropidx, layer] += torch.tensor(acc_rand)
+    if dataset.distributed:
+        for drop_type in scores:
+            print(scores[drop_type]['progdrop_loss'][:, 0, 0])
+            scores[drop_type]['progdrop_loss'] = dist.all_reduce(scores[drop_type]['progrdrop_loss'], op=dist.ReduceOp.SUM)
+            print(scores[drop_type]['progdrop_loss'][:, 0, 0])
+            scores[drop_type]['progdrop_acc'] = dist.all_reduce(scores[drop_type]['progrdrop_acc'], op=dist.ReduceOp.SUM)
+            print(num_batches)
+            num_batches = dist.all_reduce(torch.tensor(num_batches), op=dist.ReduceOp.SUM)
+            print(num_batches)
+
 
     results = {
         "progdrop_loss_high": progdrop_loss_high / num_batches,
