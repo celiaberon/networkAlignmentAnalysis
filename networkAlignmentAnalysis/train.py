@@ -107,7 +107,10 @@ def train(nets, optimizers, dataset, **parameters):
             if combine_by_epoch:
                 # Reset local and group metrics every epoch.
                 local_alignment=[]
-                full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]  
+                full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]
+                print('outer: ', len(full_alignment),
+                      '\n1st: ', len(full_alignment[0]),
+                      '\n2nd: ', len(full_alignment[0][0]))
 
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
@@ -188,7 +191,9 @@ def train(nets, optimizers, dataset, **parameters):
                     net.shape_eigenfeatures(manual_layers, eigenvalues, eigenvectors, transform)
 
         if dataset.distributed & combine_by_epoch:
+            print('local initial ': len(local_alignment))
             local_alignment = condense_values(transpose_list(local_alignment))
+            print('local post ': len(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_dist_metric(local_alignment, full_alignment)
             if dist.get_rank() == 0:
