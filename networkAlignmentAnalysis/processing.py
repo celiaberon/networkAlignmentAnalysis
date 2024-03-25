@@ -82,6 +82,10 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         beta_by_class = net.module.measure_class_eigenfeatures(
             inputs, labels, eigenfeatures[2], rms=False, with_updates=False
         )
+
+        print('betas: ', len(eigenfeatures[0]))
+        print('betas: ', eigenfeatures[0].shape)
+
         beta.append(eigenfeatures[0])
         eigvals.append(eigenfeatures[1])
         eigvecs.append(eigenfeatures[2])

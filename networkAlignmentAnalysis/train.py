@@ -277,9 +277,9 @@ def test(nets, dataset, **parameters):
         outputs = [net(images, store_hidden=True) for net in nets]
 
         # Performance Measurements
-        for idx, output in enumerate(outputs):
-            total_loss[idx] += dataset.measure_loss(output, labels).item()
-            num_correct[idx] += dataset.measure_accuracy(output, labels)
+        for net_idx, output in enumerate(outputs):
+            total_loss[net_idx] += dataset.measure_loss(output, labels).item()
+            num_correct[net_idx] += dataset.measure_accuracy(output, labels)
 
         # Keep track of number of batches
         num_batches += 1
@@ -291,10 +291,8 @@ def test(nets, dataset, **parameters):
 
     if dataset.distributed:
         # Seems that loss isn't automatically all reduced as expected?
-        print(dist.get_rank(), total_loss[:10])
         total_loss = torch.tensor(total_loss, device=dataset.device)
         dist.all_reduce(total_loss, op=dist.ReduceOp.SUM)
-        print(dist.get_rank(), num_correct[:10])
         num_correct = torch.tensor(num_correct, device=dataset.device)
         dist.all_reduce(num_correct, op=dist.ReduceOp.SUM)
         num_batches = torch.tensor(num_batches, device=dataset.device)
@@ -317,12 +315,9 @@ def test(nets, dataset, **parameters):
             # Order shouldn't matter for inference except for traceback to eigenfeatures?
             results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
-    print(dist.get_rank(), results["loss"])
-    print(dist.get_rank(), results["accuracy"])
-
     if run is not None:
-        run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
-        run.summary["test_accuracy"] = torch.mean(torch.tensor(results["accuracy"]))
+        run.summary["test_loss"] = torch.mean(results["loss"])
+        run.summary["test_accuracy"] = torch.mean(results["accuracy"])
 
     return results
 
