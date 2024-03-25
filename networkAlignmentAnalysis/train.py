@@ -465,11 +465,9 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
             # print('progrdrop loss post agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
             dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
         num_batches = torch.tensor(num_batches, device=dataset.device)
-        print(dist.get_rank(), num_batches)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
-        print(dist.get_rank(), num_batches)
 
-
+    num_batches = num_batches.cpu()
     results = {
         "progdrop_loss_high": scores['high']['progdrop_loss'].cpu() / num_batches,
         "progdrop_loss_low": scores['low']['progdrop_loss'].cpu() / num_batches,
