@@ -460,22 +460,23 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
 
     if dataset.distributed:
         for drop_type in scores:
-            print('progrdrop loss pre agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
+            # print('progrdrop loss pre agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
             dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
-            print('progrdrop loss post agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
+            # print('progrdrop loss post agg', dist.get_rank(), scores[drop_type]['progdrop_loss'][:, 0, 0])
             dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
-            print(dist.get_rank(), num_batches)
-            dist.all_reduce(torch.tensor(num_batches, device=dataset.device), op=dist.ReduceOp.SUM)
-            print(dist.get_rank(), num_batches)
+        num_batches = torch.tensor(num_batches, device=dataset.device)
+        print(dist.get_rank(), num_batches)
+        dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
+        print(dist.get_rank(), num_batches)
 
 
     results = {
-        "progdrop_loss_high": progdrop_loss_high / num_batches,
-        "progdrop_loss_low": progdrop_loss_low / num_batches,
-        "progdrop_loss_rand": progdrop_loss_rand / num_batches,
-        "progdrop_acc_high": progdrop_acc_high / num_batches,
-        "progdrop_acc_low": progdrop_acc_low / num_batches,
-        "progdrop_acc_rand": progdrop_acc_rand / num_batches,
+        "progdrop_loss_high": scores['high']['progdrop_loss'].cpu() / num_batches,
+        "progdrop_loss_low": scores['low']['progdrop_loss'].cpu() / num_batches,
+        "progdrop_loss_rand": scores['rand']['progdrop_loss'].cpu() / num_batches,
+        "progdrop_acc_high": scores['high']['progdrop_acc'].cpu() / num_batches,
+        "progdrop_acc_low": scores['low']['progdrop_acc'].cpu() / num_batches,
+        "progdrop_acc_rand": scores['rand']['progdrop_acc'].cpu() / num_batches,
         "dropout_fraction": drop_fraction,
         "by_layer": by_layer,
         "idx_dropout_layers": idx_dropout_layers,
