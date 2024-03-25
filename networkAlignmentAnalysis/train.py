@@ -404,8 +404,8 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
 
     # preallocate tracker tensors
     for key in scores:
-        scores[key]['progdrop_loss'] = torch.zeros((num_nets, num_drops, num_layers))
-        scores[key]['progdrop_acc'] = torch.zeros((num_nets, num_drops, num_layers))
+        scores[key]['progdrop_loss'] = torch.zeros((num_nets, num_drops, num_layers), device=dataset.device)
+        scores[key]['progdrop_acc'] = torch.zeros((num_nets, num_drops, num_layers), device=dataset.device)
 
     # to keep track of how many values have been added
     num_batches = 0
