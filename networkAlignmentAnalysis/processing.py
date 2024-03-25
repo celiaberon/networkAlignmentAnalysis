@@ -88,7 +88,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             pass
 
         # beta: nets, layers, nneurons
-        print(len(eigenfeatures[0][0][0]))
+        print(len(eigenfeatures[0][0][0][0]))
 
         beta.append(eigenfeatures[0])
         eigvals.append(eigenfeatures[1])
