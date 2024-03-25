@@ -316,8 +316,8 @@ def test(nets, dataset, **parameters):
             results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
     if run is not None:
-        run.summary["test_loss"] = torch.mean(results["loss"])
-        run.summary["test_accuracy"] = torch.mean(results["accuracy"])
+        run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
+        run.summary["test_accuracy"] = torch.mean(torch.tensor(results["accuracy"]))
 
     return results
 
