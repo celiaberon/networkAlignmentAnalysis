@@ -455,8 +455,8 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
                     # get accuracy with targeted dropout
                     scores[drop_type]['acc'] = [dataset.measure_accuracy(out, labels) for out in scores[drop_type]['out']]
 
-                    scores[drop_type]['progdrop_loss'][:, dropidx, layer] += torch.tensor(scores[drop_type]['loss'])
-                    scores[drop_type]['progdrop_acc'][:, dropidx, layer] += torch.tensor(scores[drop_type]['acc'])
+                    scores[drop_type]['progdrop_loss'][:, dropidx, layer] += torch.tensor(scores[drop_type]['loss'], device=dataset.device)
+                    scores[drop_type]['progdrop_acc'][:, dropidx, layer] += torch.tensor(scores[drop_type]['acc'],  device=dataset.device)
 
     if dataset.distributed:
         for drop_type in scores:
