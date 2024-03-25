@@ -83,8 +83,12 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             inputs, labels, eigenfeatures[2], rms=False, with_updates=False
         )
 
-        print('betas: ', len(eigenfeatures[0]))
-        print('betas: ', eigenfeatures[0].shape)
+        if dataset.distributed:
+            # Need to gather here to collect all images.
+            pass
+
+        # beta: nets, layers, nneurons
+        print(len(eigenfeatures[0][0][0]))
 
         beta.append(eigenfeatures[0])
         eigvals.append(eigenfeatures[1])
