@@ -28,6 +28,7 @@ def train(nets, optimizers, dataset, **parameters):
     use_train = parameters.get("train_set", True)
     dataloader = dataset.train_loader if use_train else dataset.test_loader
     num_steps = len(dataset.train_loader) * parameters["num_epochs"]
+    print(len(dataloader), num_steps)
 
     # --- optional W&B logging ---
     run = parameters.get("run")
@@ -66,12 +67,11 @@ def train(nets, optimizers, dataset, **parameters):
                 alignment_dims = get_alignment_dims(nets, dataset,
                                     num_epochs=1 if combine_by_epoch else parameters['num_epochs'],
                                     use_train=use_train)
-                print(f'expected alignment dimensions are: {alignment_dims}')
                 full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
-                                  for proc in range(dist.get_world_size())]
+                                  for _ in range(dist.get_world_size())]
                                   for layer_dims in alignment_dims]
                 alignment_reference = [[torch.clone(proc) for proc in layer_dims] for layer_dims in full_alignment]
-                print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
+                print(f'full alignment dims should be {len(full_alignment)} x {alignment_dims}')
 
         # measure weight norm throughout training
         if measure_delta_weights:
@@ -191,9 +191,8 @@ def train(nets, optimizers, dataset, **parameters):
                     net.shape_eigenfeatures(manual_layers, eigenvalues, eigenvectors, transform)
 
         if dataset.distributed and combine_by_epoch:
-            print(f'local initial {epoch} (num steps): {len(local_alignment)}')
+            # Transpose first dim from steps to layers.
             local_alignment = condense_values(transpose_list(local_alignment))
-            print(f'local post {epoch} (num layers): {len(local_alignment)}')
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_dist_metric(local_alignment, full_alignment)
             if dist.get_rank() == 0:
@@ -225,9 +224,9 @@ def train(nets, optimizers, dataset, **parameters):
         if combine_by_epoch:
             # Concatenate along step axis for each layer.
             if dist.get_rank() == 0:
-                results['alignment'] = [torch.cat(ilayer, axis=1).shape for ilayer in zip(*results['alignment'])]
+                results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
                 print(f'post agg: {len(results["alignment"])}')
-                print(f'post agg sample: {results["alignment"][0][0][0][0]}')        
+                print(f'post agg sample: {results["alignment"][0]}') # MLP: torch.Size([reps, steps x procs, out_features])       
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
@@ -258,6 +257,7 @@ def test(nets, dataset, **parameters):
     # retrieve requested dataloader from dataset
     use_test = not parameters.get("train_set", False)  # if train_set=True, use_test=False
     dataloader = dataset.test_loader if use_test else dataset.train_loader
+    print(len(dataloader))
 
     # Performance Measurements
     total_loss = [0 for _ in range(num_nets)]
@@ -272,11 +272,10 @@ def test(nets, dataset, **parameters):
         alignment = []
         if dataset.distributed:
             alignment_dims = get_alignment_dims(nets, dataset, 1, use_train=False)
-            print(f'expected alignment dimensions are: {alignment_dims}')
             full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
-                                for proc in range(dist.get_world_size())]
+                                for _ in range(dist.get_world_size())]
                                 for layer_dims in alignment_dims]
-            print(f'full alignment dims should be {len(full_alignment)} x alignment_dims')
+            print(f'full alignment dims should be {len(full_alignment)} x {alignment_dims}')
 
     for batch in tqdm(dataloader):
         images, labels = dataset.unwrap_batch(batch)
@@ -294,12 +293,8 @@ def test(nets, dataset, **parameters):
 
         # Measure Alignment
         if measure_alignment:
-            alignment.append(
-                [
-                    net.module.measure_alignment(images, precomputed=True, method="alignment")
-                    for net in nets
-                ]
-            )
+            alignment.append([net.module.measure_alignment(images, precomputed=True, method="alignment")
+                    for net in nets])
 
     results = {
         "loss": [loss / num_batches for loss in total_loss],
@@ -314,7 +309,7 @@ def test(nets, dataset, **parameters):
         gather_dist_metric(alignment_local, full_alignment)
         if dist.get_rank() == 0:
             # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
-            # Order shouldn't matter for inference?
+            # Order shouldn't matter for inference except for traceback to eigenfeatures?
             results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
     if run is not None:
