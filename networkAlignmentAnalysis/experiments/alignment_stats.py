@@ -125,6 +125,11 @@ class AlignmentStatistics(Experiment):
         """
         main plotting loop
         """
+
+        # Don't plot on every process (redundant and some missing data)
+        if self.distributed and (not self.rank == 0):
+            return None
+
         plotting.plot_train_results(
             self, results["train_results"], results["test_results"], results["prms"]
         )
