@@ -634,6 +634,23 @@ def get_list_dims(list_of_lists, preserve_arrays=True):
     else:
         # Base case: reached an item that is neither a list nor an array.
         return ()
+    
+
+def get_nested_depth(list_of_lists, current_depth=0, target_type=torch.Tensor):
+
+    """
+    Find depth of nested structure up to target_type of array (either torch.Tensor or np.ndarray).
+    """
+    assert(target_type != list)  # cannot work for type list
+    if isinstance(list_of_lists, target_type):
+        return current_depth
+    elif isinstance(list_of_lists, list):
+        for item in list_of_lists:
+            depth = get_nested_depth(item, current_depth+1)
+        if depth != -1:
+            return depth
+        
+    return -1  # no target_type found
 
 
 def construct_zeros_obj(list_of_lists, device='cpu', show_dims=False):
@@ -658,6 +675,15 @@ def construct_zeros_obj(list_of_lists, device='cpu', show_dims=False):
         return 0
 
 
+def replicate_dimension(input, target_dim, n_reps, current_dim=0):
+    """
+    Introduce N replicates of a particular dimension in the given structure.
+    """
+    if current_dim == target_dim:
+        return [input for _ in range(n_reps)]
+    else:
+        return [replicate_dimension(item, target_dim, n_reps, current_dim + 1) for item in input]
+
 
 def gather_by_layer(local_metric, grp_metric):
 
@@ -681,6 +707,11 @@ def gather_by_layer(local_metric, grp_metric):
         # Just send data from other processes.
         [dist.gather(l_, dst=0) for l_ in local_metric]
 
+
+def gather_list_of_lists(local_metric, grp_metric):
+
+    if isinstance(local_metric, list):
+        return [gather_list_of_lists(l_) for l_ in local_metric]
 
 def gather_metrics(local_metric, grp_metric):
     """
