@@ -6,7 +6,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from networkAlignmentAnalysis.utils import (condense_values,
-                                            gather_dist_metric,
+                                            gather_by_layer,
                                             get_alignment_dims,
                                             save_checkpoint, test_nets,
                                             train_nets, transpose_list)
@@ -190,7 +190,7 @@ def train(nets, optimizers, dataset, **parameters):
             # Transpose first dim from steps to layers.
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
-            gather_dist_metric(local_alignment, full_alignment)
+            gather_by_layer(local_alignment, full_alignment)
             if dist.get_rank() == 0:
                 # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
                 # TODO: permute steps to match training order.
@@ -224,7 +224,7 @@ def train(nets, optimizers, dataset, **parameters):
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
-            gather_dist_metric(local_alignment, full_alignment)
+            gather_by_layer(local_alignment, full_alignment)
             if dist.get_rank() == 0:
                 # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
                 full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]

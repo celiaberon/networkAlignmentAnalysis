@@ -1,10 +1,12 @@
 import os
 
 import torch
+import torch.distributed as dist
 from tqdm import tqdm
 
 from . import train
-from .utils import fgsm_attack, load_checkpoints, test_nets, transpose_list
+from .utils import (construct_zeros_obj, fgsm_attack, gather_metrics,
+                    get_list_dims, load_checkpoints, test_nets, transpose_list)
 
 
 def train_networks(exp, nets, optimizers, dataset, **special_parameters):
@@ -69,7 +71,11 @@ def progressive_dropout_experiment(exp, nets, dataset, alignment=None, train_set
 def measure_eigenfeatures(exp, nets, dataset, train_set=False):
     # measure eigenfeatures
     print("measuring eigenfeatures...")
-    beta, eigvals, eigvecs, class_betas = [], [], [], []
+
+    results = {'beta': [],
+               'eigvals': [],
+               'eigvecs': [],
+               'class_betas': []}
     for net in tqdm(nets):
         # get inputs to each layer from whole dataloader
         inputs, labels = net.module._process_collect_activity(
@@ -78,34 +84,33 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             with_updates=False,
             use_training_mode=False,
         )
-        eigenfeatures = net.module.measure_eigenfeatures(inputs, with_updates=False)
+        beta, eigvals, eigvecs = net.module.measure_eigenfeatures(inputs, with_updates=False)
         beta_by_class = net.module.measure_class_eigenfeatures(
-            inputs, labels, eigenfeatures[2], rms=False, with_updates=False
+            inputs, labels, eigvecs, rms=False, with_updates=False
         )
 
-        if dataset.distributed:
-            # Need to gather here to collect all images.
-            pass
+        results['beta'].append(beta)
+        results['eigvals'].append(eigvals)
+        results['eigvecs'].append(eigvecs)
+        results['class_betas'].append(beta_by_class)
 
-        # beta: nets, layers, nneurons
-        print(len(eigenfeatures[0][0][0][0]))
+    if dataset.distributed:
+        # Need to gather here to collect all images.
+        for key, metric in results.items():
+            metric_dims = get_list_dims(metric)  # beta: nets, layers, nneurons, input_dim
+            print(metric_dims)
+            agg_metric = [construct_zeros_obj(metric, device=dataset.device)
+                          for _ in range(dist.get_world_size())]
+            gather_metrics(metric, agg_metric)
+            if dist.get_rank() == 0:
+                # metric = [torch.cat(layer, dim=1).cpu() for layer in metric]
+                results[key] = metric
 
-        beta.append(eigenfeatures[0])
-        eigvals.append(eigenfeatures[1])
-        eigvecs.append(eigenfeatures[2])
-        class_betas.append(beta_by_class)
-
-    # make it a dictionary
-    class_names = getattr(
+    results['class_names'] = getattr(
         dataset.train_loader if train_set else dataset.test_loader, "dataset"
     ).classes
-    return dict(
-        beta=beta,
-        eigvals=eigvals,
-        eigvecs=eigvecs,
-        class_betas=class_betas,
-        class_names=class_names,
-    )
+
+    return results
 
 
 def eigenvector_dropout(exp, nets, dataset, eigen_results, train_set=False):
