@@ -5,8 +5,9 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from . import train
-from .utils import (construct_zeros_obj, fgsm_attack, gather_metrics,
-                    get_list_dims, load_checkpoints, test_nets, transpose_list)
+from .utils import (condense_values, construct_zeros_obj, fgsm_attack,
+                    gather_by_layer, get_list_dims, load_checkpoints,
+                    test_nets, transpose_list)
 
 
 def train_networks(exp, nets, optimizers, dataset, **special_parameters):
@@ -101,9 +102,10 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             print(metric_dims)
             agg_metric = [construct_zeros_obj(metric, device=dataset.device)
                           for _ in range(dist.get_world_size())]
-            print(agg_metric)
-            agg_metric = transpose_list(agg_metric)  # transpose to make nets outer dim
-            print(agg_metric)
+            print(get_list_dims(agg_metric))
+            print(get_list_dims(transpose_list(agg_metric)))
+            agg_metric = condense_values(transpose_list(agg_metric))  # transpose to make nets outer dim
+            print(get_list_dims(agg_metric))
             gather_by_layer(metric, agg_metric)
             if dist.get_rank() == 0:
                 # metric = [torch.cat(layer, dim=1).cpu() for layer in metric]
