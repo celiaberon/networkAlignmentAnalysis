@@ -5,9 +5,9 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from . import train
-from .utils import (construct_zeros_obj, fgsm_attack,
-                    gather_by_layer, get_list_dims, load_checkpoints,
-                    test_nets, transpose_list, get_nested_depth, replicate_dimension)
+from .utils import (construct_zeros_obj, fgsm_attack, gather_by_layer,
+                    get_list_dims, get_nested_depth, load_checkpoints,
+                    replicate_dimension, test_nets, transpose_list)
 
 
 def train_networks(exp, nets, optimizers, dataset, **special_parameters):
@@ -100,19 +100,15 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         for key, metric in results.items():
             metric_dims = get_list_dims(metric)  # beta: nets, layers, nneurons, input_dim
             depth = get_nested_depth(metric)
-            [print(type(md)) for md in metric_dims]
             print('local_dims:\n', metric_dims)
             agg_metric = replicate_dimension(construct_zeros_obj(metric, device=dataset.device),
-                                             target_dim = depth
-                                             nreps=range(dist.get_world_size()))
+                                             target_dim = depth,
+                                             n_reps=dist.get_world_size())
             
             print('\nagg dims:\n', get_list_dims(agg_metric))
-            agg_metric = torch.cat(agg_metric, dim=depth)
-            print('\naggT dims:\n', get_list_dims(agg_metric))
             gather_by_layer(metric, agg_metric)
             if dist.get_rank() == 0:
-                # metric = [torch.cat(layer, dim=1).cpu() for layer in metric]
-                results[key] = metric
+                results[key] =  [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
 
     results['class_names'] = getattr(
         dataset.train_loader if train_set else dataset.test_loader, "dataset"
