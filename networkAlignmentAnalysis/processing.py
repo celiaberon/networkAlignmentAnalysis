@@ -98,14 +98,13 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
     if dataset.distributed:
         # Need to gather here to collect all images.
         for key, metric in results.items():
-            metric_dims = get_list_dims(metric)  # beta: nets, layers, nneurons, input_dim
             depth = get_nested_depth(metric)
-            print('local_dims:\n', metric_dims)
             agg_metric = replicate_dimension(construct_zeros_obj(metric, device=dataset.device),
-                                             target_dim = depth,
+                                             target_dim=depth,
                                              n_reps=dist.get_world_size())
             
             print('\nagg dims:\n', get_list_dims(agg_metric))
+            metric = [net_metric.to(dataset.device) for net_metric in metric]
             gather_list_of_lists(metric, agg_metric)
             if dist.get_rank() == 0:
                 results[key] =  [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
