@@ -611,7 +611,55 @@ def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
     return dims
 
 
-def gather_dist_metric(local_metric, grp_metric):
+def get_list_dims(list_of_lists, preserve_arrays=True):
+    """
+    Determine the dimensions of a nested list of arbitrary depth. Returns a tuple representing the
+    dimensions of the nested list
+    """
+    
+    if isinstance(list_of_lists, torch.Tensor) or isinstance(list_of_lists, np.ndarray):
+        # Convert array shape to a tuple and return.
+        if preserve_arrays:
+            return (list_of_lists.shape,)
+        else:
+            return list_of_lists.shape
+    elif isinstance(list_of_lists, list):
+        # If it's a list, process each item.
+        dims = []
+        for item in list_of_lists:
+            item_dims = get_list_dims(item)
+            if item_dims:
+                dims.append(item_dims)  # only add item dims if they provide additional info
+        return (len(list_of_lists),) + tuple(dims)
+    else:
+        # Base case: reached an item that is neither a list nor an array.
+        return ()
+
+
+def construct_zeros_obj(list_of_lists, device='cpu', show_dims=False):
+    """
+    Construct an object of zeros that matches the dimensions of the given nested list or array.
+    Returns a new object with the same structure as the input, filled with zeros.
+    """
+
+    if show_dims:
+        print(get_list_dims(list_of_lists))
+    if isinstance(list_of_lists, np.ndarray):
+        # For numpy arrays, create a zeros array with the same shape.
+        return np.zeros(list_of_lists.shape, dtype=list_of_lists.dtype)
+    elif isinstance(list_of_lists, torch.Tensor):
+        # Same for tensors.
+        return torch.zeros(list_of_lists.shape, dtype=list_of_lists.dtype, device=device)
+    elif isinstance(list_of_lists, list):
+        # For lists, recursively build a list structure.
+        return [construct_zeros_obj(item) for item in list_of_lists]
+    else:
+        # Base case: reached a scalar value, replace it with 0.
+        return 0
+
+
+
+def gather_by_layer(local_metric, grp_metric):
 
     """
     Gather metrics calculated from distributed processes onto main process.
@@ -628,16 +676,25 @@ def gather_dist_metric(local_metric, grp_metric):
     if dist.get_rank()==0:
         # Gather data tensors onto process 0.
         [dist.gather(l_, g_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
-        # [[[dist.gather(l_layer, g_layer, dst=0) for l_layer, g_layer in zip(l_net, g_net)]
-        #                                         for l_net, g_net in zip(l_proc, g_proc)] 
-        #                                         for l_proc, g_proc in zip(local_metric, grp_metric)]
 
     else:
         # Just send data from other processes.
         [dist.gather(l_, dst=0) for l_ in local_metric]
-        # [[[dist.gather(l_layer, dst=0) for l_layer in l_net]
-        #                                 for l_net in l_proc] 
-        #                                 for l_proc in local_metric]
+
+
+def gather_metrics(local_metric, grp_metric):
+    """
+    Standard gather process that assumes outermost level of list is a sublist or array from each
+    process in world_size.
+    """
+    if dist.get_rank()==0:
+        # Gather data tensors onto process 0.
+        dist.gather(local_metric, grp_metric, dst=0)
+
+    else:
+        # Just send data from other processes.
+        dist.gather(local_metric, dst=0)
+
 
 def permute_distributed_metric(grp_metric):
 
