@@ -104,8 +104,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
                                              n_reps=dist.get_world_size())
             
             print('\nagg dims:\n', get_list_dims(agg_metric))
-            metric = [net_metric.to(dataset.device) for net_metric in metric]
-            gather_list_of_lists(metric, agg_metric)
+            gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
             if dist.get_rank() == 0:
                 results[key] =  [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
 

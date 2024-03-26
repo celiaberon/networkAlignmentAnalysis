@@ -708,9 +708,11 @@ def gather_by_layer(local_metric, grp_metric):
         [dist.gather(l_, dst=0) for l_ in local_metric]
 
 
-def gather_list_of_lists(local_metric, grp_metric):
+def gather_list_of_lists(local_metric, grp_metric, device=None, move_to_gpu=False):
 
     if isinstance(local_metric, torch.Tensor):
+        if move_to_gpu:
+            local_metric.to(device)
         if dist.get_rank() == 0:
             dist.gather(local_metric, grp_metric, dst=0)
         else:
