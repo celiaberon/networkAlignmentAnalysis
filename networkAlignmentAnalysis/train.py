@@ -5,8 +5,7 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from networkAlignmentAnalysis.utils import (condense_values,
-                                            gather_by_layer,
+from networkAlignmentAnalysis.utils import (condense_values, gather_by_layer,
                                             get_alignment_dims,
                                             save_checkpoint, test_nets,
                                             train_nets, transpose_list)
@@ -309,7 +308,7 @@ def test(nets, dataset, **parameters):
 
     if measure_alignment and dataset.distributed:
         alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
-        gather_dist_metric(alignment_local, full_alignment)
+        gather_by_layer(alignment_local, full_alignment)
         if dist.get_rank() == 0:
             # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
             # Order shouldn't matter for inference except for traceback to eigenfeatures?

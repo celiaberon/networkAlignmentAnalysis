@@ -101,7 +101,10 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             print(metric_dims)
             agg_metric = [construct_zeros_obj(metric, device=dataset.device)
                           for _ in range(dist.get_world_size())]
-            gather_metrics(metric, agg_metric)
+            print(agg_metric)
+            agg_metric = transpose_list(agg_metric)  # transpose to make nets outer dim
+            print(agg_metric)
+            gather_by_layer(metric, agg_metric)
             if dist.get_rank() == 0:
                 # metric = [torch.cat(layer, dim=1).cpu() for layer in metric]
                 results[key] = metric
