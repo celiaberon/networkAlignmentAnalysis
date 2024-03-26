@@ -99,13 +99,13 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         # Need to gather here to collect all images.
         for key, metric in results.items():
             metric_dims = get_list_dims(metric)  # beta: nets, layers, nneurons, input_dim
-            print(metric_dims)
+            [print(type(md) for md in metric_dims)]
+            print('local_dims:\n', metric_dims)
             agg_metric = [construct_zeros_obj(metric, device=dataset.device)
                           for _ in range(dist.get_world_size())]
-            print(get_list_dims(agg_metric))
-            print(get_list_dims(transpose_list(agg_metric)))
-            agg_metric = condense_values(transpose_list(agg_metric))  # transpose to make nets outer dim
-            print(get_list_dims(agg_metric))
+            print('\nagg dims:\n', get_list_dims(agg_metric))
+            agg_metric = transpose_list(agg_metric)  # transpose to make nets outer dim
+            print('\naggT dims:\n', get_list_dims(agg_metric))
             gather_by_layer(metric, agg_metric)
             if dist.get_rank() == 0:
                 # metric = [torch.cat(layer, dim=1).cpu() for layer in metric]
