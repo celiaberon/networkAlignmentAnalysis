@@ -5,7 +5,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from . import train
-from .utils import (construct_zeros_obj, fgsm_attack, gather_by_layer,
+from .utils import (construct_zeros_obj, fgsm_attack, gather_list_of_lists,
                     get_list_dims, get_nested_depth, load_checkpoints,
                     replicate_dimension, test_nets, transpose_list)
 
@@ -106,7 +106,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
                                              n_reps=dist.get_world_size())
             
             print('\nagg dims:\n', get_list_dims(agg_metric))
-            gather_by_layer(metric, agg_metric)
+            gather_list_of_lists(metric, agg_metric)
             if dist.get_rank() == 0:
                 results[key] =  [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
 

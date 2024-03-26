@@ -710,8 +710,16 @@ def gather_by_layer(local_metric, grp_metric):
 
 def gather_list_of_lists(local_metric, grp_metric):
 
-    if isinstance(local_metric, list):
-        return [gather_list_of_lists(l_) for l_ in local_metric]
+    if isinstance(local_metric, torch.Tensor):
+        if dist.get_rank() == 0:
+            dist.gather(local_metric, grp_metric, dst=0)
+        else:
+            dist.gather(local_metric, dst=0)
+        
+    elif isinstance(local_metric, list):
+        for l_, g_ in zip(local_metric, grp_metric):
+            gather_list_of_lists(l_, g_)
+        
 
 def gather_metrics(local_metric, grp_metric):
     """
