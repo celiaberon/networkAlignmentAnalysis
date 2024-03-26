@@ -1,4 +1,5 @@
 import torch
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from .. import plotting, processing
@@ -127,7 +128,7 @@ class AlignmentStatistics(Experiment):
         """
 
         # Don't plot on every process (redundant and some missing data)
-        if self.distributed and (not self.rank == 0):
+        if self.distributed and (not dist.get_rank() == 0):
             return None
 
         plotting.plot_train_results(
