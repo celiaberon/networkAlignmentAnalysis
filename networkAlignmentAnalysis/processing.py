@@ -85,6 +85,8 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             with_updates=False,
             use_training_mode=False,
         )
+        print(dist.get_rank(), len(inputs))
+        [print(i.shape) for i in inputs]
         beta, eigvals, eigvecs = net.module.measure_eigenfeatures(inputs, with_updates=False)
         beta_by_class = net.module.measure_class_eigenfeatures(
             inputs, labels, eigvecs, rms=False, with_updates=False
@@ -106,11 +108,13 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             print('\nagg dims:\n', get_list_dims(agg_metric))
             gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
             if dist.get_rank() == 0:
-                results[key] =  [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
+                results[key] =  agg_metric # [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
 
     results['class_names'] = getattr(
         dataset.train_loader if train_set else dataset.test_loader, "dataset"
     ).classes
+
+    print(dist.get_rank(), results['class_names'])
 
     return results
 

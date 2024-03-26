@@ -669,7 +669,7 @@ def construct_zeros_obj(list_of_lists, device='cpu', show_dims=False):
         return torch.zeros(list_of_lists.shape, dtype=list_of_lists.dtype, device=device)
     elif isinstance(list_of_lists, list):
         # For lists, recursively build a list structure.
-        return [construct_zeros_obj(item) for item in list_of_lists]
+        return [construct_zeros_obj(item, device=device) for item in list_of_lists]
     else:
         # Base case: reached a scalar value, replace it with 0.
         return 0
@@ -712,7 +712,8 @@ def gather_list_of_lists(local_metric, grp_metric, device=None, move_to_gpu=Fals
 
     if isinstance(local_metric, torch.Tensor):
         if move_to_gpu:
-            local_metric.to(device)
+            print(device)
+            local_metric = local_metric.to(device)
         if dist.get_rank() == 0:
             dist.gather(local_metric, grp_metric, dst=0)
         else:
@@ -720,7 +721,7 @@ def gather_list_of_lists(local_metric, grp_metric, device=None, move_to_gpu=Fals
         
     elif isinstance(local_metric, list):
         for l_, g_ in zip(local_metric, grp_metric):
-            gather_list_of_lists(l_, g_)
+            gather_list_of_lists(l_, g_, device=device, move_to_gpu=move_to_gpu)
         
 
 def gather_metrics(local_metric, grp_metric):
