@@ -705,7 +705,7 @@ def gather_by_layer(local_metric, grp_metric):
     """
     # if dist.get_rank()==0:
     # Gather data tensors onto process 0.
-    [dist.all_gather(g_, l_, dst=0) for l_, g_ in zip(local_metric, grp_metric)]
+    [dist.all_gather(g_, l_) for l_, g_ in zip(local_metric, grp_metric)]
 
     # else:
     #     # Just send data from other processes.
