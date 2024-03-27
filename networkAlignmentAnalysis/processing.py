@@ -39,7 +39,9 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
         print("loaded networks from previous checkpoint")
 
     if exp.args.save_ckpts:
-        parameters["save_checkpoints"] = (True, 1, exp.get_checkpoint_path(), exp.device)
+        parameters["save_ckpt"] = exp.args.save_ckpts
+        parameters["freq_ckpt"] = exp.args.freq_ckpts
+        parameters["path_ckpt"] = (exp.get_checkpoint_path(), exp.args.unique_ckpts)
 
     print("training networks...")
     train_results = train.train(nets, optimizers, dataset, **parameters)
@@ -85,8 +87,8 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             with_updates=False,
             use_training_mode=False,
         )
-        print(dist.get_rank(), len(inputs))
-        [print(i.shape) for i in inputs]
+        # print(dist.get_rank(), len(inputs))
+        # [print(i.shape) for i in inputs]
         beta, eigvals, eigvecs = net.module.measure_eigenfeatures(inputs, with_updates=False)
         beta_by_class = net.module.measure_class_eigenfeatures(
             inputs, labels, eigvecs, rms=False, with_updates=False
@@ -101,6 +103,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         # Need to gather here to collect all images.
         for key, metric in results.items():
             depth = get_nested_depth(metric)
+            print(depth)
             agg_metric = replicate_dimension(construct_zeros_obj(metric, device=dataset.device),
                                              target_dim=depth,
                                              n_reps=dist.get_world_size())
@@ -108,7 +111,9 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             print('\nagg dims:\n', get_list_dims(agg_metric))
             gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
             if dist.get_rank() == 0:
-                results[key] =  agg_metric # [torch.cat(net, dim=depth-1).cpu() for net in agg_metric]
+                # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
+                # Currently: (nets, layer x proc)
+                results[key] = agg_metric
 
     results['class_names'] = getattr(
         dataset.train_loader if train_set else dataset.test_loader, "dataset"

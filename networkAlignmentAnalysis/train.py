@@ -409,15 +409,17 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     by_layer = parameters.get("by_layer", False)
     num_layers = len(idx_dropout_layers) if by_layer else 1
 
+    # only need to store scores on GPU if using distributed processing.
+    internal_device = dataset.device if dataset.distributed else 'cpu'
+
+    # preallocate tracker tensors
     scores = {'high': {},
               'low': {},
               'rand': {}
              }
-
-    # preallocate tracker tensors
     for key in scores:
-        scores[key]['progdrop_loss'] = torch.zeros((num_nets, num_drops, num_layers), device=dataset.device)
-        scores[key]['progdrop_acc'] = torch.zeros((num_nets, num_drops, num_layers), device=dataset.device)
+        scores[key]['progdrop_loss'] = torch.zeros((num_nets, num_drops, num_layers), device=internal_device)
+        scores[key]['progdrop_acc'] = torch.zeros((num_nets, num_drops, num_layers), device=internal_device)
 
     # to keep track of how many values have been added
     num_batches = 0
@@ -426,7 +428,6 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     use_train = parameters.get("train_set", False)
     dataloader = dataset.train_loader if use_train else dataset.test_loader
 
-    
     # let dataloader be outer loop to minimize extract / load / transform time
     for batch in tqdm(dataloader):
         images, labels = dataset.unwrap_batch(batch)
@@ -449,7 +450,6 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
                     drop_nodes = (idx_high, idx_low, idx_rand)
                     drop_layer = copy(idx_dropout_layers)
 
-
                 for drop_node, drop_type in zip(drop_nodes, scores):
                     
                     # get output with targeted dropout (batch_size x out_features)
@@ -467,14 +467,14 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
                     # get accuracy with targeted dropout
                     scores[drop_type]['acc'] = [dataset.measure_accuracy(out, labels) for out in scores[drop_type]['out']]
 
-                    scores[drop_type]['progdrop_loss'][:, dropidx, layer] += torch.tensor(scores[drop_type]['loss'], device=dataset.device)
-                    scores[drop_type]['progdrop_acc'][:, dropidx, layer] += torch.tensor(scores[drop_type]['acc'],  device=dataset.device)
+                    scores[drop_type]['progdrop_loss'][:, dropidx, layer] += torch.tensor(scores[drop_type]['loss'], device=internal_device)
+                    scores[drop_type]['progdrop_acc'][:, dropidx, layer] += torch.tensor(scores[drop_type]['acc'],  device=internal_device)
 
     if dataset.distributed:
         for drop_type in scores:
             dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
             dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
-        num_batches = torch.tensor(num_batches, device=dataset.device)
+        num_batches = torch.tensor(num_batches, device=internal_device)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
 
     num_batches = num_batches.cpu()
@@ -528,6 +528,12 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
     # get index to each alignment layer
     idx_dropout_layers = nets[0].module.get_alignment_layer_indices()
 
+    # If using distributed processing, take only eigenvalues corresponding to subset of data in sampler.
+    if dataset.distributed:
+        rank = dist.get_rank()  # will be index of gather eigenvalues/vectors
+        eigenvalues = [[layer[rank] for layer in evals] for evals in eigenvalues]
+        eigenvectors = [[layer[rank] for layer in evecs] for evecs in eigenvectors]
+
     # check if alignment has the right length (ie number of layers) (otherwise can't make assumptions about where the classification layer is)
     assert all(
         [len(ev) == len(idx_dropout_layers) for ev in eigenvectors]
@@ -549,13 +555,17 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
         for ev in eigenvectors[0]
     ]
 
+    # only need to store scores on GPU if using distributed processing.
+    internal_device = dataset.device if dataset.distributed else 'cpu'
+
     # preallocate tracker tensors
-    progdrop_loss_high = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_loss_low = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_loss_rand = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_acc_high = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_acc_low = torch.zeros((num_nets, num_drops, num_layers))
-    progdrop_acc_rand = torch.zeros((num_nets, num_drops, num_layers))
+    scores = {'high': {},
+              'low': {},
+              'rand': {}
+             }
+    for key in scores:
+        scores[key]['progdrop_loss'] = torch.zeros((num_nets, num_drops, num_layers), device=internal_device)
+        scores[key]['progdrop_acc'] = torch.zeros((num_nets, num_drops, num_layers), device=internal_device)
 
     # to keep track of how many values have been added
     num_batches = 0
@@ -576,7 +586,7 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
             # do drop out for each layer (or across all depending on parameters)
             for layer in range(num_layers):
                 if by_layer:
-                    drop_high, drop_low, drop_rand = (
+                    drop_nodes = (
                         [idx_high[layer]],
                         [idx_low[layer]],
                         [idx_rand[layer]],
@@ -585,59 +595,46 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
                     drop_evals = [[evals[layer]] for evals in eigenvalues]
                     drop_evecs = [[evecs[layer]] for evecs in eigenvectors]
                 else:
-                    drop_high, drop_low, drop_rand = idx_high, idx_low, idx_rand
+                    drop_nodes = idx_high, idx_low, idx_rand
                     drop_layer = copy(idx_dropout_layers)
                     drop_evals = deepcopy(eigenvalues)
                     drop_evecs = deepcopy(eigenvectors)
 
-                # get output with targeted dropout
-                out_high = [
+                for drop_node, drop_type in zip(drop_nodes, scores):
+                    
+                    # get output with targeted dropout (batch_size x out_features)
+                    scores[drop_type]['out'] = [
                     net.module.forward_eigenvector_dropout(
-                        images, evals, evecs, [drop[idx, :] for drop in drop_high], drop_layer
+                        images, evals, evecs, [drop[idx, :] for drop in drop_node], drop_layer
                     )[0]
                     for idx, (net, evals, evecs) in enumerate(zip(nets, drop_evals, drop_evecs))
                 ]
 
-                out_low = [
-                    net.module.forward_eigenvector_dropout(
-                        images, evals, evecs, [drop[idx, :] for drop in drop_low], drop_layer
-                    )[0]
-                    for idx, (net, evals, evecs) in enumerate(zip(nets, drop_evals, drop_evecs))
-                ]
+                    # get loss with targeted dropout (loss_high, loss_low, loss_rand)
+                    scores[drop_type]['loss'] = [dataset.measure_loss(out, labels).item()
+                                                         for out in scores[drop_type]['out']]
 
-                out_rand = [
-                    net.module.forward_eigenvector_dropout(
-                        images, evals, evecs, [drop[idx, :] for drop in drop_rand], drop_layer
-                    )[0]
-                    for idx, (net, evals, evecs) in enumerate(zip(nets, drop_evals, drop_evecs))
-                ]
+                    # get accuracy with targeted dropout
+                    scores[drop_type]['acc'] = [dataset.measure_accuracy(out, labels) for out in scores[drop_type]['out']]
 
-                # get loss with targeted dropout
-                loss_high = [dataset.measure_loss(out, labels).item() for out in out_high]
-                loss_low = [dataset.measure_loss(out, labels).item() for out in out_low]
-                loss_rand = [dataset.measure_loss(out, labels).item() for out in out_rand]
+                    scores[drop_type]['progdrop_loss'][:, dropidx, layer] += torch.tensor(scores[drop_type]['loss'], device=internal_device)
+                    scores[drop_type]['progdrop_acc'][:, dropidx, layer] += torch.tensor(scores[drop_type]['acc'],  device=internal_device)
 
-                # get accuracy with targeted dropout
-                acc_high = [dataset.measure_accuracy(out, labels) for out in out_high]
-                acc_low = [dataset.measure_accuracy(out, labels) for out in out_low]
-                acc_rand = [dataset.measure_accuracy(out, labels) for out in out_rand]
+    if dataset.distributed:
+        for drop_type in scores:
+            dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
+            dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
+        num_batches = torch.tensor(num_batches, device=internal_device)
+        dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
 
-                # add to storage tensors
-                progdrop_loss_high[:, dropidx, layer] += torch.tensor(loss_high)
-                progdrop_loss_low[:, dropidx, layer] += torch.tensor(loss_low)
-                progdrop_loss_rand[:, dropidx, layer] += torch.tensor(loss_rand)
-
-                progdrop_acc_high[:, dropidx, layer] += torch.tensor(acc_high)
-                progdrop_acc_low[:, dropidx, layer] += torch.tensor(acc_low)
-                progdrop_acc_rand[:, dropidx, layer] += torch.tensor(acc_rand)
-
+    num_batches = num_batches.cpu()
     results = {
-        "progdrop_loss_high": progdrop_loss_high / num_batches,
-        "progdrop_loss_low": progdrop_loss_low / num_batches,
-        "progdrop_loss_rand": progdrop_loss_rand / num_batches,
-        "progdrop_acc_high": progdrop_acc_high / num_batches,
-        "progdrop_acc_low": progdrop_acc_low / num_batches,
-        "progdrop_acc_rand": progdrop_acc_rand / num_batches,
+        "progdrop_loss_high": scores['high']['progdrop_loss'].cpu() / num_batches,
+        "progdrop_loss_low": scores['low']['progdrop_loss'].cpu() / num_batches,
+        "progdrop_loss_rand": scores['rand']['progdrop_loss'].cpu() / num_batches,
+        "progdrop_acc_high": scores['high']['progdrop_acc'].cpu() / num_batches,
+        "progdrop_acc_low": scores['low']['progdrop_acc'].cpu() / num_batches,
+        "progdrop_acc_rand": scores['rand']['progdrop_acc'].cpu() / num_batches,
         "dropout_fraction": drop_fraction,
         "by_layer": by_layer,
         "idx_dropout_layers": idx_dropout_layers,
