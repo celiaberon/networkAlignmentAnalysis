@@ -6,6 +6,7 @@ from warnings import warn
 import numpy as np
 import torch
 import torch.distributed as dist
+from natsort import natsorted
 from scipy.linalg import null_space
 from sklearn.decomposition import IncrementalPCA
 
@@ -576,10 +577,13 @@ def load_checkpoints(nets, optimizers, device, path):
     TODO: device handling for passing between gpu/cpu
     """
 
+    prev_checkpoints = list(path.glob('checkpoint_*'))
+    latest_checkpoint = natsorted(prev_checkpoints)[-1] if prev_checkpoints else path
+
     if device == "cpu":
-        checkpoint = torch.load(path, map_location=device)
+        checkpoint = torch.load(latest_checkpoint, map_location=device)
     elif device == "cuda":
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(latest_checkpoint)
 
     net_ids = sorted([key for key in checkpoint if key.startswith("model_state_dict")])
     opt_ids = sorted([key for key in checkpoint if key.startswith("optimizer_state_dict")])

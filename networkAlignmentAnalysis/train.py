@@ -1,5 +1,6 @@
 import time
 from copy import copy, deepcopy
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -50,7 +51,9 @@ def train(nets, optimizers, dataset, **parameters):
     # --- create results dictionary if not provided and handle checkpoint info ---
     results = parameters.get("results", False)
     num_complete = parameters.get("num_complete", 0)
-    save_ckpt, freq_ckpt, path_ckpt, dev = parameters.get("save_checkpoints", (False, 1, "", ""))
+    save_ckpt = parameters.get("save_ckpt", False)
+    freq_ckpt = parameters.get("freq_ckpt", 1)
+    path_ckpt, unique_ckpt = parameters.get("path_ckpt", ("", True))
     if not results:
         # initialize dictionary for storing performance across epochs
         results = {
@@ -200,10 +203,13 @@ def train(nets, optimizers, dataset, **parameters):
                 
 
         if save_ckpt & (epoch % freq_ckpt == 0):
+            if unique_ckpt:
+                prefix, suffix = str(path_ckpt).split('.')
+                path_ckpt = Path(f'{prefix}_{epoch}.{suffix}')
             save_checkpoint(
                 nets,
                 optimizers,
-                results | {"prms": parameters, "epoch": epoch, "device": dev},
+                results | {"prms": parameters, "epoch": epoch, "device": dataset.device},
                 path_ckpt,
             )
 
