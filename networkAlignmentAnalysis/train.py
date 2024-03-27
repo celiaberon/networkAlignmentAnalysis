@@ -193,13 +193,13 @@ def train(nets, optimizers, dataset, **parameters):
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_by_layer(local_alignment, full_alignment)
-            if dist.get_rank() == 0:
+            # if dist.get_rank() == 0:
                 # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
                 # TODO: permute steps to match training order.
-                full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
-                # full_alignment = permute_distributed_metric(full_alignment)
-                results['alignment'].append(full_alignment)
-                print(f'agg {epoch} (num epochs): {len(results["alignment"])}')
+            full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
+            # full_alignment = permute_distributed_metric(full_alignment)
+            results['alignment'].append(full_alignment)
+            # print(f'agg {epoch} (num epochs): {len(results["alignment"])}')
                 
 
         if save_ckpt & (epoch % freq_ckpt == 0):
@@ -224,17 +224,17 @@ def train(nets, optimizers, dataset, **parameters):
     if measure_alignment and dataset.distributed:
         if combine_by_epoch:
             # Concatenate along step axis for each layer.
-            if dist.get_rank() == 0:
-                results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
+            # if dist.get_rank() == 0:
+            results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_by_layer(local_alignment, full_alignment)
-            if dist.get_rank() == 0:
-                # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
-                full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
-                # full_alignment = permute_distributed_metric(full_alignment)
-                results['alignment'] = full_alignment
+            # if dist.get_rank() == 0:
+            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
+            full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
+            # full_alignment = permute_distributed_metric(full_alignment)
+            results['alignment'] = full_alignment
     return results
 
 
@@ -315,10 +315,10 @@ def test(nets, dataset, **parameters):
     if measure_alignment and dataset.distributed:
         alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
         gather_by_layer(alignment_local, full_alignment)
-        if dist.get_rank() == 0:
-            # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
-            # Order shouldn't matter for inference except for traceback to eigenfeatures?
-            results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
+        # if dist.get_rank() == 0:
+        # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
+        # Order shouldn't matter for inference except for traceback to eigenfeatures?
+        results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
     if run is not None:
         run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))

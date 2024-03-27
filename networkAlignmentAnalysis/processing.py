@@ -110,10 +110,10 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             
             print('\nagg dims:\n', get_list_dims(agg_metric))
             gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
-            if dist.get_rank() == 0:
-                # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
-                # Currently: (nets, layer x proc)
-                results[key] = agg_metric
+            # if dist.get_rank() == 0:
+            # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
+            # Currently: (nets, layer x proc)
+            results[key] = agg_metric
 
     results['class_names'] = getattr(
         dataset.train_loader if train_set else dataset.test_loader, "dataset"
