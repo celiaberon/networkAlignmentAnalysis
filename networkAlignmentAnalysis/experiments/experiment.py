@@ -381,11 +381,16 @@ class Experiment(ABC):
     def wrap_ddp(self, nets):
         return [DDP(net, device_ids=[self.device]) for net in nets]
 
-    def plot_ready(self, name):
+    def plot_ready(self, name, by_rank=False):
         """standard method for saving and showing plot when it's ready"""
         # if saving, then save the plot
         if not self.args.nosave:
-            plt.savefig(str(self.get_path(name)))
+            save_path = str(self.get_path(name))
+            if self.distributed and by_rank:
+                rank = dist.get_rank()
+                prefix, suffix = save_path.split('.')
+                save_path = Path(f'{prefix}_{rank}.{suffix}')
+            plt.savefig(save_path)
         if self.run is not None:
             self.run.log({name: wandb.Image(plt)})
         # show the plot now if not doing showall
