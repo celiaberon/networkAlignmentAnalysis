@@ -277,8 +277,9 @@ def plot_eigenfeatures(exp, results, prms):
 
     if exp.distributed:
         rank = dist.get_rank()
-        eigvals = [[layer[rank] for layer in evals] for evals in eigvals]
-        beta = [[layer[rank] for layer in b] for b in beta]
+        eigvals = [[layer[rank].cpu() for layer in evals] for evals in eigvals]
+        beta = [[layer[rank].cpu() for layer in b] for b in beta]
+        class_betas = [[layer[rank].cpu() for layer in cb] for cb in class_betas]
 
     beta = [[torch.abs(b) for b in net_beta] for net_beta in beta]
     class_betas = [[rms(cb, dim=2) for cb in net_class_beta] for net_class_beta in class_betas]
