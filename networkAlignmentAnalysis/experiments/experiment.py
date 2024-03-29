@@ -388,8 +388,8 @@ class Experiment(ABC):
             save_path = str(self.get_path(name))
             if self.distributed and by_rank:
                 rank = dist.get_rank()
-                prefix, suffix = save_path.split('.')
-                save_path = Path(f'{prefix}_{rank}.{suffix}')
+                save_path = f'{save_path}_{rank}'
+                name = f'{name}_{rank}'
             plt.savefig(save_path)
         if self.run is not None:
             self.run.log({name: wandb.Image(plt)})
