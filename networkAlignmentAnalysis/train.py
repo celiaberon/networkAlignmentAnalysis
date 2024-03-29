@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from networkAlignmentAnalysis.utils import (condense_values, gather_by_layer,
                                             get_alignment_dims,
+                                            permute_distributed_metric,
                                             save_checkpoint, test_nets,
                                             train_nets, transpose_list)
 
@@ -76,7 +77,7 @@ def train(nets, optimizers, dataset, **parameters):
                                   for _ in range(dist.get_world_size())]
                                   for layer_dims in alignment_dims]
                 alignment_reference = [[torch.clone(proc) for proc in layer_dims] for layer_dims in full_alignment]
-                print(f'full alignment dims should be {len(full_alignment)} x {alignment_dims}')
+                print(f'full alignment dims should be {dist.get_world_size()} x {alignment_dims}')
 
         # measure weight norm throughout training
         if measure_delta_weights:
@@ -135,12 +136,12 @@ def train(nets, optimizers, dataset, **parameters):
 
             # Put accuracy reduce here. Assume loss done automatically?
             if dataset.distributed:
-                print('loss', dist.get_rank(), results["loss"][cidx])
+                # print('loss', dist.get_rank(), results["loss"][cidx])
                 # Seems that loss isn't automatically all reduced as expected?
-                if dataset.loss_functon.reduction == 'mean':
+                if dataset.loss_function.reduction == 'mean':
                     dist.all_reduce(results["loss"][cidx], op=dist.ReduceOp.AVG)
                     dist.all_reduce(results["loss"][cidx], op=dist.ReduceOp.AVG)
-                    print('loss', dist.get_rank(), results["loss"][cidx])
+                    # print('loss', dist.get_rank(), results["loss"][cidx])
                 else:
                     raise NotImplementedError
                 
@@ -200,8 +201,9 @@ def train(nets, optimizers, dataset, **parameters):
             gather_by_layer(local_alignment, full_alignment)
             # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
             # TODO: permute steps to match training order.
-            full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
-            # full_alignment = permute_distributed_metric(full_alignment)
+            full_alignment = [permute_distributed_metric(torch.cat(layer, dim=1).cpu()) for layer in full_alignment]
+            # perm_idcs = torch.tensor([i for n in range(rows) for i in range(n, cols, rows)])
+            # full_alignment = [permute_distributed_metric(layer) for layer in full_alignment)
             results['alignment'].append(full_alignment)
 
         if save_ckpt & (epoch % freq_ckpt == 0):
