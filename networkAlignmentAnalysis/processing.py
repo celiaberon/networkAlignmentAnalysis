@@ -103,14 +103,11 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         # Need to gather here to collect all images.
         for key, metric in results.items():
             depth = get_nested_depth(metric)
-            print(depth)
             agg_metric = replicate_dimension(construct_zeros_obj(metric, device=dataset.device),
                                              target_dim=depth,
                                              n_reps=dist.get_world_size())
-            
-            print('\nagg dims:\n', get_list_dims(agg_metric))
+            # print('\nagg dims:\n', get_list_dims(agg_metric))
             gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
-            # if dist.get_rank() == 0:
             # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
             # Currently: (nets, layer x proc)
             results[key] = agg_metric
@@ -119,7 +116,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         dataset.train_loader if train_set else dataset.test_loader, "dataset"
     ).classes
 
-    print(dist.get_rank(), results['class_names'])
+    print(dist.get_rank(), results['class_names'])  # need to confirm always the same, even as dataset grows
 
     return results
 

@@ -54,11 +54,15 @@ def train(nets, optimizers, dataset, **parameters):
     save_ckpt = parameters.get("save_ckpt", False)
     freq_ckpt = parameters.get("freq_ckpt", 1)
     path_ckpt, unique_ckpt = parameters.get("path_ckpt", ("", True))
+    
+    # Store metrics on GPU if using DDP, otherwise store on cpu.
+    internal_device = dataset.device if dataset.distributed else 'cpu'
+    
     if not results:
         # initialize dictionary for storing performance across epochs
         results = {
-            "loss": torch.zeros((num_steps, num_nets)),
-            "accuracy": torch.zeros((num_steps, num_nets)),
+            "loss": torch.zeros((num_steps, num_nets), device=internal_device),
+            "accuracy": torch.zeros((num_steps, num_nets), device=internal_device),
         }
 
         # measure alignment throughout training
@@ -102,9 +106,6 @@ def train(nets, optimizers, dataset, **parameters):
             else:
                 dataset.test_sampler.set_epoch(epoch)
 
-            if dist.get_rank() == 0:
-                first_batch_timer = time.time()
-
             if combine_by_epoch:
                 # Reset local and group metrics every epoch.
                 local_alignment=[]
@@ -114,11 +115,6 @@ def train(nets, optimizers, dataset, **parameters):
             cidx = epoch * len(dataloader) + idx
             images, labels = dataset.unwrap_batch(batch, device=dataset.device)
 
-            if dataset.distributed and dist.get_rank() == 0 and idx == 0:
-                print(
-                    f"Train-- epoch {epoch}, rank {dist.get_rank()}, first batch loaded in ",
-                    f"{time.time() - first_batch_timer} seconds."
-                )
             # Zero the gradients
             for opt in optimizers:
                 opt.zero_grad()
@@ -132,13 +128,22 @@ def train(nets, optimizers, dataset, **parameters):
                 l.backward()
                 opt.step()
 
-            results["loss"][cidx] = torch.tensor([l.item() for l in loss])
+            results["loss"][cidx] = torch.tensor([l.item() for l in loss], device=internal_device)
             results["accuracy"][cidx] = torch.tensor(
-                [dataset.measure_accuracy(output, labels) for output in outputs]
+                [dataset.measure_accuracy(output, labels) for output in outputs], device=internal_device
             )
 
             # Put accuracy reduce here. Assume loss done automatically?
-
+            if dataset.distributed:
+                print('loss', dist.get_rank(), results["loss"][cidx])
+                # Seems that loss isn't automatically all reduced as expected?
+                if dataset.loss_functon.reduction == 'mean':
+                    dist.all_reduce(results["loss"][cidx], op=dist.ReduceOp.AVG)
+                    dist.all_reduce(results["loss"][cidx], op=dist.ReduceOp.AVG)
+                    print('loss', dist.get_rank(), results["loss"][cidx])
+                else:
+                    raise NotImplementedError
+                
             if idx % measure_frequency == 0:
                 if measure_alignment:
                     # Measure alignment if requested
@@ -193,14 +198,11 @@ def train(nets, optimizers, dataset, **parameters):
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_by_layer(local_alignment, full_alignment)
-            # if dist.get_rank() == 0:
-                # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
-                # TODO: permute steps to match training order.
+            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
+            # TODO: permute steps to match training order.
             full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
             # full_alignment = permute_distributed_metric(full_alignment)
             results['alignment'].append(full_alignment)
-            # print(f'agg {epoch} (num epochs): {len(results["alignment"])}')
-                
 
         if save_ckpt & (epoch % freq_ckpt == 0):
             if unique_ckpt:
@@ -222,15 +224,15 @@ def train(nets, optimizers, dataset, **parameters):
         results[k] = condense_values(transpose_list(results[k]))
 
     if measure_alignment and dataset.distributed:
+        results["loss"] = results["loss"].cpu()
+        results["accuracy"] = results["accuracy"].cpu()
         if combine_by_epoch:
             # Concatenate along step axis for each layer.
-            # if dist.get_rank() == 0:
             results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_by_layer(local_alignment, full_alignment)
-            # if dist.get_rank() == 0:
             # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
             full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
             # full_alignment = permute_distributed_metric(full_alignment)
@@ -315,7 +317,6 @@ def test(nets, dataset, **parameters):
     if measure_alignment and dataset.distributed:
         alignment_local = [layer.to(dataset.device) for layer in results['alignment']]
         gather_by_layer(alignment_local, full_alignment)
-        # if dist.get_rank() == 0:
         # Overwrite local alignment for main process with aggregated. Stack onto dimension for test batches.
         # Order shouldn't matter for inference except for traceback to eigenfeatures?
         results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]

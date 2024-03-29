@@ -703,26 +703,17 @@ def gather_by_layer(local_metric, grp_metric):
          [[nnets, nsteps, outfeatures] x process] x layer
          (later becomes: [nnets, nsteps x n_processes, outfeatures] x layer)
     """
-    # if dist.get_rank()==0:
-    # Gather data tensors onto process 0.
+    # Gather data tensors onto all processes.
     [dist.all_gather(g_, l_) for l_, g_ in zip(local_metric, grp_metric)]
-
-    # else:
-    #     # Just send data from other processes.
-    #     [dist.gather(l_, dst=0) for l_ in local_metric]
 
 
 def gather_list_of_lists(local_metric, grp_metric, device=None, move_to_gpu=False):
 
     if isinstance(local_metric, torch.Tensor):
         if move_to_gpu:
-            print(device)
             local_metric = local_metric.to(device)
-        # if dist.get_rank() == 0:
         dist.all_gather(grp_metric, local_metric)
-        # else:
-        #     dist.gather(local_metric, dst=0)
-        
+
     elif isinstance(local_metric, list):
         for l_, g_ in zip(local_metric, grp_metric):
             gather_list_of_lists(l_, g_, device=device, move_to_gpu=move_to_gpu)
@@ -733,13 +724,8 @@ def gather_metrics(local_metric, grp_metric):
     Standard gather process that assumes outermost level of list is a sublist or array from each
     process in world_size.
     """
-    # if dist.get_rank()==0:
-    # Gather data tensors onto process 0.
+    # Gather data tensors onto on all processes.
     dist.all_gather(grp_metric, local_metric)
-
-    # else:
-    #     # Just send data from other processes.
-    #     dist.gather(local_metric, dst=0)
 
 
 def permute_distributed_metric(grp_metric):
