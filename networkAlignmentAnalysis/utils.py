@@ -736,6 +736,8 @@ def permute_distributed_metric(grp_metric):
     """
 
     n_processes = dist.get_world_size()
+    n_steps = grp_metric.shape[1]
+    perm_interval = n_processes // n_steps
     split_array = [grp_metric[:, i::n_processes, :] for i in range(n_processes)]
     permuted_metric = torch.cat(split_array, dim=1)
     return permuted_metric
