@@ -199,23 +199,21 @@ def train(nets, optimizers, dataset, **parameters):
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_by_layer(local_alignment, full_alignment)
-            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
-            # TODO: permute steps to match training order.
             full_alignment = [permute_distributed_metric(torch.cat(layer, dim=1).cpu()) for layer in full_alignment]
-            # perm_idcs = torch.tensor([i for n in range(rows) for i in range(n, cols, rows)])
-            # full_alignment = [permute_distributed_metric(layer) for layer in full_alignment)
             results['alignment'].append(full_alignment)
 
         if save_ckpt & (epoch % freq_ckpt == 0):
-            if unique_ckpt:
-                prefix, suffix = str(path_ckpt).split('.')
-                path_ckpt = Path(f'{prefix}_{epoch}.{suffix}')
-            save_checkpoint(
-                nets,
-                optimizers,
-                results | {"prms": parameters, "epoch": epoch, "device": dataset.device},
-                path_ckpt,
-            )
+            if (not dataset.distributed) or (dist.get_rank() == 0):
+                if unique_ckpt:
+                    prefix, suffix = str(path_ckpt).split('.')
+                    prefix = prefix.split('checkpoint')[0]  # for subsequent epoch checkpoints
+                    path_ckpt = Path(f'{prefix}checkpoint_{epoch}.{suffix}')
+                save_checkpoint(
+                    nets,
+                    optimizers,
+                    results | {"prms": parameters, "epoch": epoch, "device": dataset.device},
+                    path_ckpt,
+                )
 
     # condense optional analyses
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
@@ -229,7 +227,7 @@ def train(nets, optimizers, dataset, **parameters):
         results["loss"] = results["loss"].cpu()
         results["accuracy"] = results["accuracy"].cpu()
         if combine_by_epoch:
-            # Concatenate along step axis for each layer.
+            # Concatenate along step axis for each layer?
             results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
         else:
             local_alignment = condense_values(transpose_list(local_alignment))
@@ -477,17 +475,20 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
         for drop_type in scores:
             dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
             dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
+            # Move back to cpu.
+            scores[drop_type]['progdrop_loss'] = scores[drop_type]['progdrop_loss'].cpu()
+            scores[drop_type]['progdrop_acc'] = scores[drop_type]['progdrop_acc'].cpu()
         num_batches = torch.tensor(num_batches, device=internal_device)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
-
-    num_batches = num_batches.cpu()
+        num_batches = num_batches.cpu()
+    
     results = {
-        "progdrop_loss_high": scores['high']['progdrop_loss'].cpu() / num_batches,
-        "progdrop_loss_low": scores['low']['progdrop_loss'].cpu() / num_batches,
-        "progdrop_loss_rand": scores['rand']['progdrop_loss'].cpu() / num_batches,
-        "progdrop_acc_high": scores['high']['progdrop_acc'].cpu() / num_batches,
-        "progdrop_acc_low": scores['low']['progdrop_acc'].cpu() / num_batches,
-        "progdrop_acc_rand": scores['rand']['progdrop_acc'].cpu() / num_batches,
+        "progdrop_loss_high": scores['high']['progdrop_loss'] / num_batches,
+        "progdrop_loss_low": scores['low']['progdrop_loss'] / num_batches,
+        "progdrop_loss_rand": scores['rand']['progdrop_loss'] / num_batches,
+        "progdrop_acc_high": scores['high']['progdrop_acc'] / num_batches,
+        "progdrop_acc_low": scores['low']['progdrop_acc'] / num_batches,
+        "progdrop_acc_rand": scores['rand']['progdrop_acc'] / num_batches,
         "dropout_fraction": drop_fraction,
         "by_layer": by_layer,
         "idx_dropout_layers": idx_dropout_layers,
@@ -627,17 +628,20 @@ def eigenvector_dropout(nets, dataset, eigenvalues, eigenvectors, **parameters):
         for drop_type in scores:
             dist.all_reduce(scores[drop_type]['progdrop_loss'], op=dist.ReduceOp.SUM)
             dist.all_reduce(scores[drop_type]['progdrop_acc'], op=dist.ReduceOp.SUM)
+            # Move back to cpu.
+            scores[drop_type]['progdrop_loss'] = scores[drop_type]['progdrop_loss'].cpu()
+            scores[drop_type]['progdrop_acc'] = scores[drop_type]['progdrop_acc'].cpu()
         num_batches = torch.tensor(num_batches, device=internal_device)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
-
-    num_batches = num_batches.cpu()
+        num_batches = num_batches.cpu()
+    
     results = {
-        "progdrop_loss_high": scores['high']['progdrop_loss'].cpu() / num_batches,
-        "progdrop_loss_low": scores['low']['progdrop_loss'].cpu() / num_batches,
-        "progdrop_loss_rand": scores['rand']['progdrop_loss'].cpu() / num_batches,
-        "progdrop_acc_high": scores['high']['progdrop_acc'].cpu() / num_batches,
-        "progdrop_acc_low": scores['low']['progdrop_acc'].cpu() / num_batches,
-        "progdrop_acc_rand": scores['rand']['progdrop_acc'].cpu() / num_batches,
+        "progdrop_loss_high": scores['high']['progdrop_loss'] / num_batches,
+        "progdrop_loss_low": scores['low']['progdrop_loss'] / num_batches,
+        "progdrop_loss_rand": scores['rand']['progdrop_loss'] / num_batches,
+        "progdrop_acc_high": scores['high']['progdrop_acc'] / num_batches,
+        "progdrop_acc_low": scores['low']['progdrop_acc'] / num_batches,
+        "progdrop_acc_rand": scores['rand']['progdrop_acc'] / num_batches,
         "dropout_fraction": drop_fraction,
         "by_layer": by_layer,
         "idx_dropout_layers": idx_dropout_layers,
