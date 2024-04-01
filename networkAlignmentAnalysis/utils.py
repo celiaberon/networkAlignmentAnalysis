@@ -9,6 +9,7 @@ import torch.distributed as dist
 from natsort import natsorted
 from scipy.linalg import null_space
 from sklearn.decomposition import IncrementalPCA
+from torch import nn
 
 
 # -------------- context managers & decorators --------------
@@ -609,8 +610,15 @@ def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
 
     #TODO: generalize this better to include conv layers
     dataloader = dataset.train_loader if use_train else dataset.test_loader
-    dims = [(len(nets), len(dataloader) * num_epochs, layer.out_features)
-            for layer in nets[0].module.get_alignment_layers()]
+    # dims = [(len(nets), len(dataloader) * num_epochs, layer.out_features)
+    #         for layer in nets[0].module.get_alignment_layers()]
+
+    dims = []
+    for layer in nets[0].module.get_alignment_layers():
+        if type(layer) == nn.Linear:
+            dims.append((len(nets), len(dataloader) * num_epochs, layer.out_features))
+        elif type(layer) == nn.Conv2d:
+            dims.append((len(nets), len(dataloader) * num_epochs, layer.out_channels))
 
     return dims
 
@@ -737,7 +745,7 @@ def permute_distributed_metric(grp_metric):
 
     n_processes = dist.get_world_size()
     n_steps = grp_metric.shape[1]
-    perm_interval = n_processes // n_steps
-    split_array = [grp_metric[:, i::n_processes, :] for i in range(n_processes)]
+    perm_interval = n_steps // n_processes
+    split_array = [grp_metric[:, i::perm_interval, :] for i in range(perm_interval)]
     permuted_metric = torch.cat(split_array, dim=1)
     return permuted_metric
