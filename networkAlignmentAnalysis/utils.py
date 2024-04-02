@@ -407,6 +407,38 @@ def get_unfold_params(layer):
     return dict(stride=layer.stride, padding=layer.padding, dilation=layer.dilation)
 
 
+# ----- cvPCA methods -----
+@torch.no_grad()
+def cvPCA(X1, X2):
+    """X1, X2 are both (dimensions x samples)"""
+    D, B = X1.shape
+    assert X2.shape == (D, B), "shape of X1 and X2 is not the same"
+    _, u = smart_pca(X1)
+    
+    cproj0 = X1.T @ u
+    cproj1 = X2.T @ u
+    ss = (cproj0 * cproj1).mean(axis=0)
+    return ss
+
+def get_num_components(nc, shape):
+    return nc if nc is not None else min(shape)
+
+@torch.no_grad()
+def shuff_cvPCA(X1, X2, nshuff=5, cvmethod=cvPCA):
+    """X1, X2 are both (dimensions x samples)"""
+    D, B = X1.shape
+    assert X2.shape == (D, B), "shape of X1 and X2 is not the same"
+    nc = get_num_components(None, (D, B))
+    ss=torch.zeros((nshuff,nc))
+    X = torch.stack((X1, X2))
+    for k in range(nshuff):
+        iflip = 1*(torch.rand(B) > 0.5)
+        X1c = torch.gather(X, 0, iflip.view(1, 1, -1).expand(1, D, -1)).squeeze(0)
+        X2c = torch.gather(X, 0, -(iflip-1).view(1, 1, -1).expand(1, D, -1)).squeeze(0)
+        ss[k]=cvmethod(X1c, X2c)
+    return ss
+
+
 def avg_value_by_layer(full):
     """
     return average value per layer across training
