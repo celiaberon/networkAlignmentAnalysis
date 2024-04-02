@@ -7,6 +7,8 @@ from networkAlignmentAnalysis.utils import (
     test_nets,
     train_nets,
     save_checkpoint,
+    smart_pca,
+    expected_alignment_distribution,
 )
 
 
@@ -33,7 +35,9 @@ def train(nets, optimizers, dataset, **parameters):
     # --- optional analyses ---
     measure_alignment = parameters.get("alignment", True)
     measure_delta_weights = parameters.get("delta_weights", False)
+    measure_delta_alignment = parameters.get("delta_alignment", False)
     measure_frequency = parameters.get("frequency", 1)
+    compare_expected = parameters.get("compare_expected", False)
 
     # --- optional training method: manual shaping with eigenvectors ---
     manual_shape = parameters.get("manual_shape", False)  # true or False, whether to do this
@@ -62,6 +66,21 @@ def train(nets, optimizers, dataset, **parameters):
         if measure_delta_weights:
             results["delta_weights"] = []
             results["init_weights"] = [net.get_alignment_weights() for net in nets]
+
+        # measure alignment of weight updates throughout training
+        if measure_delta_alignment:
+            if not "init_weights" in results:
+                results["init_weights"] = [net.get_alignment_weights() for net in nets]
+            results["delta_alignment"] = []
+
+        # compare true alignment distribution to expected distribution (according to Fiete alignment definition)
+        if compare_expected:
+            calign_bins = torch.linspace(0, 1, 301)
+            results["compare_alignment_bins"] = calign_bins
+            results["compare_alignment_expected"] = []
+            results["compare_alignment_observed"] = []
+            if measure_delta_alignment:
+                results["compare_delta_alignment_observed"] = []
 
     # If loaded from checkpoint but running more epochs than initialized for.
     elif results["loss"].shape[0] < num_steps:
@@ -102,9 +121,36 @@ def train(nets, optimizers, dataset, **parameters):
                     # Measure alignment if requested
                     results["alignment"].append([net.measure_alignment(images, precomputed=True, method="alignment") for net in nets])
 
-                if measure_delta_weights:
-                    # Measure change in weights if requested
-                    results["delta_weights"].append([net.compare_weights(init_weight) for net, init_weight in zip(nets, results["init_weights"])])
+                if measure_delta_weights or measure_delta_alignment:
+                    c_delta_weights = [net.compare_weights(init_weight) for net, init_weight in zip(nets, results["init_weights"])]
+                    if measure_delta_weights:
+                        # Save change in weights if requested
+                        results["delta_weights"].append(c_delta_weights)
+                    if measure_delta_alignment:
+                        # Save delta weight alignment if requested
+                        c_delta_alignment = [
+                            net.measure_alignment_weights(images, weights, precomputed=True, method="alignment")
+                            for net, weights in zip(nets, c_delta_weights)
+                        ]
+                        results["delta_alignment"].append(c_delta_alignment)
+
+                if compare_expected:
+                    # Measure distribution of alignment, compare with expected given "Alignment" from Fiete definition
+                    if measure_alignment:
+                        c_alignment = results["alignment"][-1]
+                    else:
+                        c_alignment = [net.measure_alignment(images, precomputed=True, method="alignment") for net in nets]
+                    c_inputs = [net.get_layer_inputs(images, precomputed=True) for net in nets]
+                    c_inputs = [net._preprocess_inputs(cin) for net, cin in zip(nets, c_inputs)]
+                    c_evals = [[smart_pca(c.T)[0] for c in cin] for cin in c_inputs]
+                    c_dist = [[expected_alignment_distribution(ev, valid_rotation=False, bins=calign_bins)[0] for ev in c_eval] for c_eval in c_evals]
+                    t_dist = [[torch.histogram(align.cpu(), bins=calign_bins, density=True)[0] for align in c_align] for c_align in c_alignment]
+                    results["compare_alignment_expected"].append(c_dist)
+                    results["compare_alignment_observed"].append(t_dist)
+                    if measure_delta_alignment:
+                        d_alignment = results["delta_alignment"][-1]
+                        d_dist = [[torch.histogram(dalign.cpu(), bins=calign_bins, density=True)[0] for dalign in d_align] for d_align in d_alignment]
+                        results["compare_delta_alignment_observed"].append(d_dist)
 
             if run is not None:
                 run.log(
@@ -135,7 +181,16 @@ def train(nets, optimizers, dataset, **parameters):
             )
 
     # condense optional analyses
-    for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
+    for k in [
+        "alignment",
+        "delta_weights",
+        "delta_alignment",
+        "avgcorr",
+        "fullcorr",
+        "compare_alignment_expected",
+        "compare_alignment_observed",
+        "compare_delta_alignment_observed",
+    ]:
         if k not in results.keys():
             continue
         results[k] = condense_values(transpose_list(results[k]))
