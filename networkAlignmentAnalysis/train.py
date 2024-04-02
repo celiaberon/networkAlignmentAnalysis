@@ -7,7 +7,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from networkAlignmentAnalysis.utils import (condense_values, gather_by_layer,
-                                            get_alignment_dims,
+                                            get_alignment_dims, get_list_dims,
                                             permute_distributed_metric,
                                             save_checkpoint, test_nets,
                                             train_nets, transpose_list)
@@ -37,7 +37,6 @@ def train(nets, optimizers, dataset, **parameters):
     measure_alignment = parameters.get("alignment", True)
     measure_delta_weights = parameters.get("delta_weights", False)
     measure_frequency = parameters.get("frequency", 1)
-    combine_by_epoch = parameters.get('combine_by_epoch', True)
 
     # --- optional training method: manual shaping with eigenvectors ---
     manual_shape = parameters.get("manual_shape", False)  # true or False, whether to do this
@@ -71,7 +70,7 @@ def train(nets, optimizers, dataset, **parameters):
             results["alignment"] = []
             if dataset.distributed:
                 alignment_dims = get_alignment_dims(nets, dataset,
-                                    num_epochs=1 if combine_by_epoch else parameters['num_epochs'],
+                                    num_epochs=1,  # can set to num epochs if don't want to agg every epoch
                                     use_train=use_train)
                 full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
                                   for _ in range(dist.get_world_size())]
@@ -107,10 +106,9 @@ def train(nets, optimizers, dataset, **parameters):
             else:
                 dataset.test_sampler.set_epoch(epoch)
 
-            if combine_by_epoch:
-                # Reset local and group metrics every epoch.
-                local_alignment=[]
-                full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]
+            # Reset local and group metrics every epoch.
+            local_alignment=[]
+            full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]
 
         for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
             cidx = epoch * len(dataloader) + idx
@@ -194,13 +192,14 @@ def train(nets, optimizers, dataset, **parameters):
                     eigenvectors = [eigenvectors[idx_to_layer_lookup[ml]] for ml in manual_layers]
                     net.shape_eigenfeatures(manual_layers, eigenvalues, eigenvectors, transform)
 
-        if dataset.distributed and combine_by_epoch:
+        if dataset.distributed:
             # Transpose first dim from steps to layers.
             local_alignment = condense_values(transpose_list(local_alignment))
             local_alignment = [layer.to(dataset.device) for layer in local_alignment]
             gather_by_layer(local_alignment, full_alignment)
             full_alignment = [permute_distributed_metric(torch.cat(layer, dim=1).cpu()) for layer in full_alignment]
             results['alignment'].append(full_alignment)
+            dist.barrier()
 
         if save_ckpt and ((epoch % freq_ckpt == 0) or (epoch == (parameters["num_epochs"] - 1))):
             if (not dataset.distributed) or (dist.get_rank() == 0):
@@ -214,6 +213,8 @@ def train(nets, optimizers, dataset, **parameters):
                     results | {"prms": parameters, "epoch": epoch, "device": dataset.device},
                     path_ckpt,
                 )
+            if dataset.distributed:
+                dist.barrier()
 
     # condense optional analyses
     for k in ["alignment", "delta_weights", "avgcorr", "fullcorr"]:
@@ -226,17 +227,12 @@ def train(nets, optimizers, dataset, **parameters):
     if measure_alignment and dataset.distributed:
         results["loss"] = results["loss"].cpu()
         results["accuracy"] = results["accuracy"].cpu()
-        if combine_by_epoch:
-            # Concatenate along step axis for each layer?
-            results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
-        else:
-            local_alignment = condense_values(transpose_list(local_alignment))
-            local_alignment = [layer.to(dataset.device) for layer in local_alignment]
-            gather_by_layer(local_alignment, full_alignment)
-            # Overwrite local alignment for main process with aggregated. Stack onto dimension for train steps.
-            full_alignment = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
-            # full_alignment = permute_distributed_metric(full_alignment)
-            results['alignment'] = full_alignment
+        
+        # Concatenate along step axis for each layer?
+        results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
+        print('post', get_list_dims(results["alignment"]))
+        dist.barrier()
+
     return results
 
 
@@ -305,6 +301,7 @@ def test(nets, dataset, **parameters):
         num_batches = torch.tensor(num_batches, device=dataset.device)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
         num_batches = num_batches.cpu()
+        dist.barrier()
 
     results = {
         "loss": [loss / num_batches for loss in total_loss],
@@ -321,9 +318,9 @@ def test(nets, dataset, **parameters):
         # Order shouldn't matter for inference except for traceback to eigenfeatures?
         results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
-    if run is not None:
-        run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
-        run.summary["test_accuracy"] = torch.mean(torch.tensor(results["accuracy"]))
+    # if run is not None:
+    #     run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
+    #     run.summary["test_accuracy"] = torch.mean(torch.tensor(results["accuracy"]))
 
     return results
 
@@ -387,6 +384,11 @@ def progressive_dropout(nets, dataset, alignment=None, **parameters):
     # get alignment of networks if not provided
     if alignment is None:
         alignment = test(nets, dataset, **parameters)["alignment"]
+
+    # If using distributed processing, take only alignment corresponding to subset of data in sampler.
+    if dataset.distributed:
+        rank = dist.get_rank()  # will be index of gather eigenvalues/vectors
+        alignment = [layer[:, ::dist.get_world_size(), :] for layer in alignment]
 
     # check if alignment has the right length (ie number of layers) (otherwise can't make assumptions about where the classification layer is)
     assert len(alignment) == len(

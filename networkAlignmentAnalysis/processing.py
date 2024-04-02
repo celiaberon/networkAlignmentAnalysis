@@ -25,12 +25,13 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
     # update with special parameters
     parameters.update(**special_parameters)
 
-    if exp.args.use_prev & any(list(exp.get_dir().glob('checkpoint*'))):
+    if exp.args.use_prev & any(list(exp.get_dir(create=False).glob('checkpoint*'))):
         nets, optimizers, results = load_checkpoints(
-            nets, optimizers, exp.device, exp.get_dir()
+            nets, optimizers, exp.device, exp.get_dir(create=False)
         )
-        if exp.distributed:
-            nets = exp.wrap_ddp(nets)
+        parameters = results.pop('prms')
+        # if exp.distributed:
+        #     nets = exp.wrap_ddp(nets)
         for net in nets:
             net.train()
 
@@ -87,8 +88,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             with_updates=False,
             use_training_mode=False,
         )
-        # print(dist.get_rank(), len(inputs))
-        # [print(i.shape) for i in inputs]
+
         beta, eigvals, eigvecs = net.module.measure_eigenfeatures(inputs, with_updates=False)
         beta_by_class = net.module.measure_class_eigenfeatures(
             inputs, labels, eigvecs, rms=False, with_updates=False
@@ -106,7 +106,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             agg_metric = replicate_dimension(construct_zeros_obj(metric, device=dataset.device),
                                              target_dim=depth,
                                              n_reps=dist.get_world_size())
-            # print('\nagg dims:\n', get_list_dims(agg_metric))
+
             gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
             # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
             # Currently: (nets, layer x proc)

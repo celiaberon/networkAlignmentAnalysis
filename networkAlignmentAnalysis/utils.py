@@ -580,12 +580,16 @@ def load_checkpoints(nets, optimizers, device, path):
 
     prev_checkpoints = list(path.glob('checkpoint_*'))
     latest_checkpoint = natsorted(prev_checkpoints)[-1] if prev_checkpoints else path / 'checkpoint.tar'
-    print(f'loading from latest checkpoint: {latest_checkpoint}')
+    print(f'loading from latest checkpoint: {latest_checkpoint}')\
 
     if device == "cpu":
         checkpoint = torch.load(latest_checkpoint, map_location=device)
-    elif device == "cuda":
+    elif device == 'cuda':
         checkpoint = torch.load(latest_checkpoint)
+    elif isinstance(device, int):
+        map_location = {'cuda:0': f'cuda:{device}'}
+        checkpoint = torch.load(latest_checkpoint, map_location=map_location)
+
 
     net_ids = sorted([key for key in checkpoint if key.startswith("model_state_dict")])
     opt_ids = sorted([key for key in checkpoint if key.startswith("optimizer_state_dict")])
@@ -611,8 +615,6 @@ def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
 
     #TODO: generalize this better to include conv layers
     dataloader = dataset.train_loader if use_train else dataset.test_loader
-    # dims = [(len(nets), len(dataloader) * num_epochs, layer.out_features)
-    #         for layer in nets[0].module.get_alignment_layers()]
 
     dims = []
     for layer in nets[0].module.get_alignment_layers():

@@ -84,6 +84,10 @@ class Experiment(ABC):
         # Make full path to experiment directory
         exp_path = self.basepath / self.get_exp_path()
 
+        if os.environ.get("WORLD_SIZE", 1) > 1:
+            if (dist.get_rank()==0):
+                return exp_path
+        
         # Make experiment directory if it doesn't yet exist
         if create and not (exp_path.exists()):
             exp_path.mkdir(parents=True)
@@ -105,6 +109,9 @@ class Experiment(ABC):
     def get_path(self, name, create=True) -> Path:
         """Method for returning path to file"""
         # get experiment directory
+        if os.environ.get("WORLD_SIZE", 1) > 1:
+            if (dist.get_rank()==0):
+                create = False
         exp_path = self.get_dir(create=create)
 
         # return full path (including stem)
@@ -391,6 +398,7 @@ class Experiment(ABC):
                 rank = dist.get_rank()
                 save_path = f'{save_path}_{rank}'
                 name = f'{name}_{rank}'
+                dist.barrier()
             plt.savefig(save_path)
         if self.run is not None:
             self.run.log({name: wandb.Image(plt)})
