@@ -202,7 +202,7 @@ def train(nets, optimizers, dataset, **parameters):
             full_alignment = [permute_distributed_metric(torch.cat(layer, dim=1).cpu()) for layer in full_alignment]
             results['alignment'].append(full_alignment)
 
-        if save_ckpt & (epoch % freq_ckpt == 0):
+        if save_ckpt and ((epoch % freq_ckpt == 0) or (epoch == (parameters["num_epochs"] - 1))):
             if (not dataset.distributed) or (dist.get_rank() == 0):
                 if unique_ckpt:
                     prefix, suffix = str(path_ckpt).split('.')

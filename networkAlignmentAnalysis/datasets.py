@@ -22,6 +22,7 @@ def default_loader_parameters(
     shuffle=True,
     pin_memory=True,
     persistent_workers=True,
+    drop_last=True,
 ):
     """
     contains the default dataloader parameters with the option of updating them
@@ -33,6 +34,7 @@ def default_loader_parameters(
         shuffle=False if distributed else shuffle,  # can't use shuffle=True if using DDP
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,
+        drop_last=True
     )
     return default_parameters
 
