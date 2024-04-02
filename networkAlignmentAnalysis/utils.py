@@ -579,7 +579,8 @@ def load_checkpoints(nets, optimizers, device, path):
     """
 
     prev_checkpoints = list(path.glob('checkpoint_*'))
-    latest_checkpoint = natsorted(prev_checkpoints)[-1] if prev_checkpoints else path
+    latest_checkpoint = natsorted(prev_checkpoints)[-1] if prev_checkpoints else path / 'checkpoint.tar'
+    print(f'loading from latest checkpoint: {latest_checkpoint}')
 
     if device == "cpu":
         checkpoint = torch.load(latest_checkpoint, map_location=device)

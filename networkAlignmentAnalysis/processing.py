@@ -25,9 +25,9 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
     # update with special parameters
     parameters.update(**special_parameters)
 
-    if exp.args.use_prev & os.path.isfile(exp.get_checkpoint_path()):
+    if exp.args.use_prev & any(list(exp.get_dir().glob('checkpoint*'))):
         nets, optimizers, results = load_checkpoints(
-            nets, optimizers, exp.device, exp.get_checkpoint_path()
+            nets, optimizers, exp.device, exp.get_dir()
         )
         if exp.distributed:
             nets = exp.wrap_ddp(nets)
