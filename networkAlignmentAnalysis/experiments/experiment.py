@@ -114,9 +114,10 @@ class Experiment(ABC):
         """create a wandb run file and set environment parameters appropriately"""
         if self.args.use_wandb:
             wandb.login()
+            
             run = wandb.init(
                 project=self.get_basename(),
-                name="",
+                name=os.environ.get("SLURM_JOB_ID", ""),
                 config=self.args,
             )
 
