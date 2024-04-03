@@ -42,7 +42,7 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
     if exp.args.save_ckpts:
         parameters["save_ckpt"] = exp.args.save_ckpts
         parameters["freq_ckpt"] = exp.args.freq_ckpts
-        parameters["path_ckpt"] = (exp.get_checkpoint_path(), exp.args.unique_ckpts)
+        parameters["path_ckpt"] = (exp.get_checkpoint_path(create=False), exp.args.unique_ckpts)
 
     print("training networks...")
     train_results = train.train(nets, optimizers, dataset, **parameters)
@@ -100,6 +100,7 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
         results['class_betas'].append(beta_by_class)
 
     if dataset.distributed:
+        dist.barrier()
         # Need to gather here to collect all images.
         for key, metric in results.items():
             depth = get_nested_depth(metric)
@@ -107,7 +108,11 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
                                              target_dim=depth,
                                              n_reps=dist.get_world_size())
 
+            print(f'{key} dims:', get_list_dims(agg_metric))
+
+            print(f'pre gather on {dist.get_rank()} for {key}')
             gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
+            print(f'post gather on {dist.get_rank()} for {key}')
             # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
             # Currently: (nets, layer x proc)
             results[key] = agg_metric

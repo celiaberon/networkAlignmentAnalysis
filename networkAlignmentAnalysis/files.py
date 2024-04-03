@@ -5,7 +5,7 @@ from pathlib import Path
 PATH_REGISTRY = {
     "DESKTOP-M2J64J2": Path("C:/Users/andrew/Documents/machineLearning"),
     "Celia": Path("/Users/celiaberon/Documents/machine_learning"),
-    "cberon": Path("/n/home00/cberon/alignment/"),
+    "cberon": Path("/n/holylabs/LABS/bsabatini_lab/Users/cberon/alignment/"),
     "corwin": Path("/Users/corwin/Building"),
     "atlandau": Path("/n/home05/atlandau/machine_learning"),
 }

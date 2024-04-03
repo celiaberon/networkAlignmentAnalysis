@@ -83,13 +83,13 @@ class Experiment(ABC):
         """
         # Make full path to experiment directory
         exp_path = self.basepath / self.get_exp_path()
-
-        if os.environ.get("WORLD_SIZE", 1) > 1:
-            if (dist.get_rank()==0):
+        
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
+            if dist.get_rank()!=0:
                 return exp_path
         
         # Make experiment directory if it doesn't yet exist
-        if create and not (exp_path.exists()):
+        if create and not exp_path.exists():
             exp_path.mkdir(parents=True)
 
         return exp_path
@@ -104,12 +104,15 @@ class Experiment(ABC):
         if self.args.use_timestamp:
             exp_path = exp_path / self.timestamp
 
+        if self.args.use_jobid:
+            exp_path = exp_path / os.environ["SLURM_JOB_ID"]
+
         return exp_path
 
     def get_path(self, name, create=True) -> Path:
         """Method for returning path to file"""
         # get experiment directory
-        if os.environ.get("WORLD_SIZE", 1) > 1:
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
             if (dist.get_rank()==0):
                 create = False
         exp_path = self.get_dir(create=create)
@@ -220,7 +223,12 @@ class Experiment(ABC):
             default=None,
             help="the timestamp of a previous experiment to plot or observe parameters",
         )
-
+        parser.add_argument(
+            "--use_jobid",
+            default=False,
+            action="store_true",
+            help="if used, will save data in a folder named after the current job",
+        )
         # parse arguments (passing directly because initial parser will remove the "--experiment" argument)
         self.args = parser.parse_args(args=args)
 
