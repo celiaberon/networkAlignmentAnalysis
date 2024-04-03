@@ -193,3 +193,14 @@ def measure_adversarial_attacks(nets, dataset, exp, eigen_results, train_set=Fal
 
     # Return the accuracy and an adversarial example
     return dict(accuracy=accuracy, betas=betas, examples=examples, epsilons=epsilons, use_sign=use_sign)
+
+
+@test_nets
+def measure_alignment_distribution(nets, dataset, **parameters):
+    """
+    method for measuring alignment distribution and several associated analyses
+    """
+    # do training loop
+    parameters = dict(
+        train_set=True,
+    )
