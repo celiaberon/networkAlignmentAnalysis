@@ -1,7 +1,6 @@
-import multiprocessing
+from warnings import warn
 from abc import ABC, abstractmethod
 
-import numpy as np
 import torch
 import torchvision
 from torch import nn
@@ -126,7 +125,12 @@ class DataSet(ABC):
         """simple method for unwrapping batch for simple training loops"""
         device = self.device if device is None else device
         if self.extra_transform:
-            batch = self.extra_transform(batch)
+            if type(self.extra_transform) == list:
+                for et in self.extra_transform:
+                    batch = et(batch)
+            else:
+                warn("extra_transform is not a list, this is deprecated!", DeprecationWarning, stacklevel=2)
+                batch = self.extra_transform(batch)
         inputs, targets = batch
         inputs, targets = inputs.to(device), targets.to(device)
         return inputs, targets
