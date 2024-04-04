@@ -114,7 +114,7 @@ def train(nets, optimizers, dataset, **parameters):
                 opt.step()
 
             results["loss"][cidx] = torch.tensor([l.item() for l in loss])
-            results["accuracy"][cidx] = torch.tensor([dataset.measure_accuracy(output, labels) for output in outputs])
+            results["accuracy"][cidx] = torch.tensor([dataset.measure_accuracy(output, labels).cpu() for output in outputs])
 
             if idx % measure_frequency == 0:
                 if measure_alignment:
@@ -238,7 +238,7 @@ def test(nets, dataset, **parameters):
         # Performance Measurements
         for idx, output in enumerate(outputs):
             total_loss[idx] += dataset.measure_loss(output, labels).item()
-            num_correct[idx] += dataset.measure_accuracy(output, labels)
+            num_correct[idx] += dataset.measure_accuracy(output, labels).cpu()
 
         # Keep track of number of batches
         num_batches += 1
