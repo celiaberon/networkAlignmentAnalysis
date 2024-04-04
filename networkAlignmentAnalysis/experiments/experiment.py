@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from socket import gethostname
 from typing import Dict, List, Tuple
+import logging
 
 import torch
 import torch.distributed as dist
@@ -32,6 +33,7 @@ class Experiment(ABC):
             'batch_size': self.args.batch_size
         }
         self.setup_ddp()  # Configure experiment for distributed training if appropriate
+        self.configure_logging()
 
     def report(self, init=False, args=False, meta_args=False) -> None:
         """Method for programmatically reporting details about experiment"""
@@ -229,6 +231,12 @@ class Experiment(ABC):
             action="store_true",
             help="if used, will save data in a folder named after the current job",
         )
+        parser.add_argument(
+            "--log",
+            default='info',
+            type=str,
+            help="set logging level",
+        )
         # parse arguments (passing directly because initial parser will remove the "--experiment" argument)
         self.args = parser.parse_args(args=args)
 
@@ -267,6 +275,21 @@ class Experiment(ABC):
         """Method for loading path to network checkpoint file"""
         return self.get_dir() / "checkpoint.tar"
 
+    def configure_logging(self):
+
+        levels = {'debug': logging.DEBUG, 'info': logging.INFO, 'warning': logging.WARNING, 'error': logging.ERROR, 'critical': logging.CRITICAL}
+        logging_level = levels.get(self.args.log, 'info')
+        filename = os.environ.get("SLURM_JOB_ID", 'local_run') + '.log'
+        logging.basicConfig(filename= files.homedir_path() / 'logs' / filename,
+                    format = '%(asctime)s:  %(levelname)-10s  %(name)-12s   %(message)s', 
+                    level=logging_level)
+        self.main_logger = logging.getLogger()
+
+        self.main_logger.info(f'MASTER_ADDR = {os.environ.get("MASTER_ADDR")}')
+        self.main_logger.info(f'MASTER_PORT = {os.environ.get("MASTER_PORT")}')
+        self.main_logger.info(f'SLURM_NTASKS = {os.environ.get("SLURM_NTASKS")}')
+        self.main_logger.info(f'SLURM_NGPUS = {os.environ.get("SLURM_GPUS_ON_NODE")}')
+    
     def _update_args(self, prms):
         """Method for updating arguments from saved parameter dictionary"""
         # First check if saved parameters contain unknown keys
