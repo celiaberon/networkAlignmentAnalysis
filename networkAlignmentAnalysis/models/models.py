@@ -20,7 +20,7 @@ class MLP(AlignmentNetwork):
             activation = nn.Identity()
         else:
             activation = nn.ReLU()
-        
+
         # Input layer is always Linear then ReLU
         layerInput = nn.Sequential(nn.Linear(input_dim, hidden_widths[0]), activation)
 
@@ -253,7 +253,9 @@ class AlexNet(AlignmentNetwork):
                 "flatten": False,
                 "resize": (256, 256),
                 # 'out_channel': 3, # will replace extra-transform with this when torchvision is ready
-                "extra_transform": gray_to_rgb,
+                "extra_transform": [
+                    gray_to_rgb,
+                ],
             },
             "CIFAR10": {
                 "flatten": False,
