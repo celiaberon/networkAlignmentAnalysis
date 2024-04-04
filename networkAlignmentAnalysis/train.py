@@ -23,6 +23,9 @@ def train(nets, optimizers, dataset, **parameters):
         optimizers = [optimizers]
     assert len(nets) == len(optimizers), "nets and optimizers need to be equal length lists"
 
+    # check if we should print progress bars
+    verbose = parameters.get("verbose", True)
+
     # preallocate variables and define metaparameters
     num_nets = len(nets)
     use_train = parameters.get("train_set", True)
@@ -95,8 +98,18 @@ def train(nets, optimizers, dataset, **parameters):
         print("resuming training from checkpoint on epoch", num_complete)
 
     # --- training loop ---
-    for epoch in tqdm(range(num_complete, parameters["num_epochs"]), desc="training epoch"):
-        for idx, batch in enumerate(tqdm(dataloader, desc="minibatch", leave=False)):
+    epoch_loop = range(num_complete, parameters["num_epochs"])
+    if verbose:
+        epoch_loop = tqdm(epoch_loop, desc="training epoch")
+
+    for epoch in epoch_loop:
+
+        # Create batch loop with optional progress updates
+        batch_loop = enumerate(dataloader)
+        if verbose:
+            batch_loop = tqdm(batch_loop, desc="minibatch", leave=False)
+
+        for idx, batch in batch_loop:
             cidx = epoch * len(dataloader) + idx
             images, labels = dataset.unwrap_batch(batch)
 
@@ -211,6 +224,7 @@ def test(nets, dataset, **parameters):
         nets = [nets]
 
     # preallocate variables and define metaparameters
+    verbose = parameters.get("verbose", True)
     num_nets = len(nets)
 
     # retrieve requested dataloader from dataset
@@ -229,7 +243,8 @@ def test(nets, dataset, **parameters):
     if measure_alignment:
         alignment = []
 
-    for batch in tqdm(dataloader):
+    batch_loop = tqdm(dataloader) if verbose else dataloader
+    for batch in batch_loop:
         images, labels = dataset.unwrap_batch(batch)
 
         # Perform forward pass
@@ -238,7 +253,7 @@ def test(nets, dataset, **parameters):
         # Performance Measurements
         for idx, output in enumerate(outputs):
             total_loss[idx] += dataset.measure_loss(output, labels).item()
-            num_correct[idx] += dataset.measure_accuracy(output, labels).cpu()
+            num_correct[idx] += dataset.measure_accuracy(output, labels).item()
 
         # Keep track of number of batches
         num_batches += 1
