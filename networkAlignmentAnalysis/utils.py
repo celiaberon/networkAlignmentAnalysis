@@ -369,7 +369,7 @@ def alignment(input, weight, method="alignment", relative=True):
 
 
 @torch.no_grad()
-def expected_alignment_distribution(eigenvalues, relative=True, valid_rotation=True, bins=11, num_tests=100):
+def expected_alignment_distribution(eigenvalues, relative=True, valid_rotation=True, with_rotation=True, bins=11, num_tests=100):
     """
     for a set of eigenvalues, measure the expected distribution given aligned weights
 
@@ -384,14 +384,17 @@ def expected_alignment_distribution(eigenvalues, relative=True, valid_rotation=T
     if relative:
         eigenvalues /= eigenvalues.sum()
     eigenvalues = eigenvalues.view(-1, 1).expand(-1, N * num_tests)
-    if valid_rotation:
-        mixing = [torch.linalg.qr(torch.normal(0, 1 / math.sqrt(N), (N, N)))[0].T for _ in range(num_tests)]
-        coefficients = torch.concatenate(mixing, axis=1) ** 2
+    if with_rotation:
+        if valid_rotation:
+            mixing = [torch.linalg.qr(torch.normal(0, 1 / math.sqrt(N), (N, N)))[0].T for _ in range(num_tests)]
+            coefficients = torch.concatenate(mixing, axis=1) ** 2
+        else:
+            coefficients = torch.normal(0, 1 / math.sqrt(N), (N, N * num_tests)) ** 2
     else:
-        coefficients = torch.normal(0, 1 / math.sqrt(N), (N, N * num_tests)) ** 2
+        coefficients = torch.ones((N, N * num_tests))
     coefficients = coefficients.to(get_device(eigenvalues))
     weights = eigenvalues * coefficients
-    alignment = torch.mean(eigenvalues * weights, dim=0) / weights.sum(dim=0)
+    alignment = torch.sum(eigenvalues * weights, dim=0) / weights.sum(dim=0)
     counts, bins = torch.histogram(alignment.cpu(), bins=bins, density=True)
     centers = edge2center(bins)
     return counts, bins, centers
@@ -414,14 +417,16 @@ def cvPCA(X1, X2):
     D, B = X1.shape
     assert X2.shape == (D, B), "shape of X1 and X2 is not the same"
     _, u = smart_pca(X1)
-    
+
     cproj0 = X1.T @ u
     cproj1 = X2.T @ u
     ss = (cproj0 * cproj1).mean(axis=0)
     return ss
 
+
 def get_num_components(nc, shape):
     return nc if nc is not None else min(shape)
+
 
 @torch.no_grad()
 def shuff_cvPCA(X1, X2, nshuff=5, cvmethod=cvPCA):
@@ -429,13 +434,13 @@ def shuff_cvPCA(X1, X2, nshuff=5, cvmethod=cvPCA):
     D, B = X1.shape
     assert X2.shape == (D, B), "shape of X1 and X2 is not the same"
     nc = get_num_components(None, (D, B))
-    ss=torch.zeros((nshuff,nc))
+    ss = torch.zeros((nshuff, nc))
     X = torch.stack((X1, X2))
     for k in range(nshuff):
-        iflip = 1*(torch.rand(B) > 0.5)
+        iflip = 1 * (torch.rand(B) > 0.5)
         X1c = torch.gather(X, 0, iflip.view(1, 1, -1).expand(1, D, -1)).squeeze(0)
-        X2c = torch.gather(X, 0, -(iflip-1).view(1, 1, -1).expand(1, D, -1)).squeeze(0)
-        ss[k]=cvmethod(X1c, X2c)
+        X2c = torch.gather(X, 0, -(iflip - 1).view(1, 1, -1).expand(1, D, -1)).squeeze(0)
+        ss[k] = cvmethod(X1c, X2c)
     return ss
 
 
