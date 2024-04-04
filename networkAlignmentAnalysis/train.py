@@ -318,10 +318,6 @@ def test(nets, dataset, **parameters):
         # Order shouldn't matter for inference except for traceback to eigenfeatures?
         results['alignment'] = [torch.cat(layer, dim=1).cpu() for layer in full_alignment]
 
-    # if run is not None:
-    #     run.summary["test_loss"] = torch.mean(torch.tensor(results["loss"]))
-    #     run.summary["test_accuracy"] = torch.mean(torch.tensor(results["accuracy"]))
-
     return results
 
 
