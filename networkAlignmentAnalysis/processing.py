@@ -76,6 +76,14 @@ def progressive_dropout_experiment(exp, nets, dataset, alignment=None, train_set
     return dropout_results, dropout_parameters
 
 
+def min_samples_per_class(labels):
+    # get stacked indices to the elements of each class
+    classes, num_samples = torch.unique(labels, return_counts=True)
+    min_per_class = min(num_samples)
+
+    return min_per_class
+
+
 def measure_eigenfeatures(exp, nets, dataset, train_set=False):
     # measure eigenfeatures
     print("measuring eigenfeatures...")
@@ -93,11 +101,19 @@ def measure_eigenfeatures(exp, nets, dataset, train_set=False):
             with_updates=False,
             use_training_mode=False,
         )
+        
+        if dataset.distributed:
+            min_per_class = torch.tensor(min_samples_per_class(labels), device=dataset.device)
+            logger.info(f'{dist.get_rank()} sample limit = {min_per_class}')
+            dist.all_reduce(min_per_class, op=dist.ReduceOp.MIN)
+            # min_per_class = min_per_class.cpu()
+            logger.info(f'{dist.get_rank()} sample limit = {min_per_class}')
+
         logger.info(f'rank {dist.get_rank()} collected activity')
         beta, eigvals, eigvecs = net.module.measure_eigenfeatures(inputs, with_updates=False)
         logger.info(f'rank {dist.get_rank()} measured eigenfeatures')
         beta_by_class = net.module.measure_class_eigenfeatures(
-            inputs, labels, eigvecs, rms=False, with_updates=False
+            inputs, labels, eigvecs, rms=False, with_updates=False, num_samples_per_class=min_per_class
         )
         logger.info(f'rank {dist.get_rank()} measured class eigenfeatures')
         results['beta'].append(beta)
