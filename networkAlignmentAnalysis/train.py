@@ -105,11 +105,11 @@ def train(nets, optimizers, dataset, **parameters):
     for epoch in epoch_loop:
 
         # Create batch loop with optional progress updates
-        batch_loop = enumerate(dataloader)
+        batch_loop = dataloader
         if verbose:
             batch_loop = tqdm(batch_loop, desc="minibatch", leave=False)
 
-        for idx, batch in batch_loop:
+        for idx, batch in enumerate(batch_loop):
             cidx = epoch * len(dataloader) + idx
             images, labels = dataset.unwrap_batch(batch)
 
