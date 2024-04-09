@@ -611,9 +611,13 @@ class AlignmentNetwork(nn.Module, ABC):
         inputs = self._preprocess_inputs(inputs, compress_convolutional=True)
 
         # measure eigenfeatures
-        return self._measure_layer_eigenfeatures(inputs, weights, centered=centered, with_updates=with_updates)
+        return self._measure_layer_eigenfeatures(
+            inputs, weights, centered=centered, with_updates=with_updates
+        )           
 
-    def measure_class_eigenfeatures(self, inputs, labels, eigenvectors, rms=False, with_updates=True):
+    def measure_class_eigenfeatures(
+        self, inputs, labels, eigenvectors, rms=False, with_updates=True, num_samples_per_class=torch.inf
+    ):
         """
         propagate an entire dataset through the network and measure the contribution
         of each eigenvector to each element of the class
@@ -633,7 +637,8 @@ class AlignmentNetwork(nn.Module, ABC):
         num_classes = len(classes)
         idx_to_class = [torch.where(labels == ii)[0] for ii in classes]
         num_per_class = [len(idx) for idx in idx_to_class]
-        min_per_class = min(num_per_class)
+        min_per_class = min(min(num_per_class), num_samples_per_class)
+
         if any([npc > min_per_class for npc in num_per_class]):
             max_per_class = max(num_per_class)
             if (max_per_class / min_per_class) > 2:

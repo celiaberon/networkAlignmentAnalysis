@@ -1,10 +1,11 @@
-import numpy as np
-from tqdm import tqdm
-from matplotlib import pyplot as plt
 import matplotlib as mpl
-
+import numpy as np
 import torch
-from .utils import compute_stats_by_type, named_transpose, transpose_list, rms
+import torch.distributed as dist
+from matplotlib import pyplot as plt
+from tqdm import tqdm
+
+from .utils import compute_stats_by_type, named_transpose, rms, transpose_list
 
 
 def plot_train_results(exp, train_results, test_results, prms):
@@ -241,6 +242,13 @@ def plot_eigenfeatures(exp, results, prms):
         results["class_betas"],
         results["class_names"],
     )
+
+    if exp.distributed:
+        rank = dist.get_rank()
+        eigvals = [[layer[rank].cpu() for layer in evals] for evals in eigvals]
+        beta = [[layer[rank].cpu() for layer in b] for b in beta]
+        class_betas = [[layer[rank].cpu() for layer in cb] for cb in class_betas]
+
     beta = [[torch.abs(b) for b in net_beta] for net_beta in beta]
     class_betas = [[rms(cb, dim=2) for cb in net_class_beta] for net_class_beta in class_betas]
 
@@ -316,7 +324,7 @@ def plot_eigenfeatures(exp, results, prms):
                 ax[0, layer].legend(loc="best")
                 ax[1, layer].legend(loc="best")
 
-    exp.plot_ready("eigenfeatures")
+    exp.plot_ready("eigenfeatures", by_rank=True)
 
     fig, ax = plt.subplots(1, num_layers, figsize=(num_layers * figdim, figdim), layout="constrained")
 
@@ -349,7 +357,7 @@ def plot_eigenfeatures(exp, results, prms):
             if layer == num_layers - 1:
                 ax[layer].legend(loc="best")
 
-    exp.plot_ready("eigenfeatures_loglog")
+    exp.plot_ready("eigenfeatures_loglog", by_rank=True)
 
     fig, ax = plt.subplots(
         num_types,
@@ -383,7 +391,7 @@ def plot_eigenfeatures(exp, results, prms):
             if layer == num_layers - 1:
                 ax[idx, layer].legend(loc="upper right", fontsize=6)
 
-    exp.plot_ready("class_eigenfeatures")
+    exp.plot_ready("class_eigenfeatures", by_rank=True)
 
 
 def plot_adversarial_results(exp, eigen_results, adversarial_results, prms):

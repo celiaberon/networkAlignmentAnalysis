@@ -8,15 +8,21 @@ from torch.optim.lr_scheduler import StepLR
 import os
 import sys
 import time
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from socket import gethostname
+
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.optim.lr_scheduler import StepLR
 
 mainPath = os.path.dirname(os.path.abspath(__file__)) + "/.."
 sys.path.append(mainPath)
 
 from networkAlignmentAnalysis import datasets
 from networkAlignmentAnalysis.models.registry import get_model
+from networkAlignmentAnalysis.utils import gather_dist_metric
 
 
 def configure_wandb(args):
@@ -44,6 +50,11 @@ def train(args, model, device, dataset, optimizer, epoch, rank, run, train=True)
     if rank == 0:
         first_batch_timer = time.time()
 
+
+    nsteps = len(dataloader)
+    local_array = torch.zeros((nsteps, 2), dtype=torch.int64, device=device)
+    gathered_array = [torch.zeros_like(local_array) for _ in range(dist.get_world_size())]
+    # gathered_data = [] # Initialize main list for aggregating data
     model.train()
     for batch_idx, batch in enumerate(dataloader):
         data, target = dataset.unwrap_batch(batch, device=device)
@@ -54,6 +65,9 @@ def train(args, model, device, dataset, optimizer, epoch, rank, run, train=True)
         loss = dataset.measure_loss(output, target)
         loss.backward()
         optimizer.step()
+
+        local_array[batch_idx] = torch.tensor([rank, batch_idx], device=device)
+
         if batch_idx % args.log_interval == 0:
             if rank == 0:
                 print(f"Train Epoch: {epoch} [{batch_idx}/{len(dataloader)} ({100.*batch_idx/len(dataloader):.0f}%)] \t Loss: {loss.item():.6f}")
@@ -61,6 +75,12 @@ def train(args, model, device, dataset, optimizer, epoch, rank, run, train=True)
                     run.log(dict(epoch=epoch, batch_idx=batch_idx, train_loss=loss.item()))
             if args.dry_run:
                 break
+        
+    gather_dist_metric(local_array, gathered_array)
+    if rank==0:
+        [t.to(device) for t in gathered_array]  # move all tensors to main process
+        gathered_array = torch.stack(gathered_array)
+        print(gathered_array[:10])
 
 
 def test(model, device, dataset, run, train=False):
@@ -174,6 +194,7 @@ def main():
     loader_parameters = dict(
         batch_size=args.batch_size,
         num_workers=max(int(os.environ["SLURM_CPUS_PER_TASK"]) - 1, 1),  # save a little headroom
+        distributed=world_size > 1,
     )
 
     if world_size > 1:
@@ -188,7 +209,9 @@ def main():
     model_name = "AlexNet"
     dataset_name = "ImageNet"
     net = get_model(model_name, build=True, dataset=dataset_name)
-    dataset = create_dataset(dataset_name, net, distributed=world_size > 1, loader_parameters=loader_parameters)
+    dataset = create_dataset(
+        dataset_name, net, loader_parameters=loader_parameters
+    )
 
     model = net.to(local_rank)
     ddp_model = DDP(model, device_ids=[local_rank]) if world_size > 1 else model

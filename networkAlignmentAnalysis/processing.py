@@ -1,9 +1,15 @@
 import os
-from tqdm import tqdm
-import torch
-from . import train
-from .utils import load_checkpoints, test_nets, transpose_list, fgsm_attack
 
+import torch
+import torch.distributed as dist
+from tqdm import tqdm
+import logging
+from . import train
+from .utils import (construct_zeros_obj, fgsm_attack, gather_list_of_lists,
+                    get_list_dims, get_nested_depth, load_checkpoints,
+                    replicate_dimension, test_nets, transpose_list)
+
+logger = logging.getLogger(__name__)
 
 def train_networks(exp, nets, optimizers, dataset, **special_parameters):
     """train and test networks"""
@@ -20,8 +26,13 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
     # update with special parameters
     parameters.update(**special_parameters)
 
-    if exp.args.use_prev & os.path.isfile(exp.get_checkpoint_path()):
-        nets, optimizers, results = load_checkpoints(nets, optimizers, exp.args.device, exp.get_checkpoint_path())
+    if exp.args.use_prev & any(list(exp.get_dir(create=False).glob('checkpoint*'))):
+        nets, optimizers, results = load_checkpoints(
+            nets, optimizers, exp.device, exp.get_dir(create=False)
+        )
+        parameters = results.pop('prms')
+        # if exp.distributed:
+        #     nets = exp.wrap_ddp(nets)
         for net in nets:
             net.train()
 
@@ -30,7 +41,9 @@ def train_networks(exp, nets, optimizers, dataset, **special_parameters):
         print("loaded networks from previous checkpoint")
 
     if exp.args.save_ckpts:
-        parameters["save_checkpoints"] = (True, exp.args.ckpt_frequency, exp.get_checkpoint_path(), exp.args.device)
+        parameters["save_ckpt"] = exp.args.save_ckpts
+        parameters["freq_ckpt"] = exp.args.freq_ckpts
+        parameters["path_ckpt"] = (exp.get_checkpoint_path(), exp.args.unique_ckpts)
 
     print("training networks...")
     train_results = train.train(nets, optimizers, dataset, **parameters)
@@ -51,39 +64,87 @@ def progressive_dropout_experiment(exp, nets, dataset, alignment=None, train_set
     """
     # do targeted dropout experiment
     print("performing targeted dropout...")
-    dropout_parameters = dict(num_drops=exp.args.num_drops, by_layer=exp.args.dropout_by_layer, train_set=train_set)
-    dropout_results = train.progressive_dropout(nets, dataset, alignment=alignment, **dropout_parameters)
+    logger.info(f'rank {dist.get_rank()} starting dropout')
+    dropout_parameters = dict(
+        num_drops=exp.args.num_drops, by_layer=exp.args.dropout_by_layer, train_set=train_set
+    )
+    dropout_results = train.progressive_dropout(
+        nets, dataset, alignment=alignment, **dropout_parameters
+    )
+    logger.info(f'rank {dist.get_rank()} finished dropout')
+
     return dropout_results, dropout_parameters
+
+
+def min_samples_per_class(labels):
+    # get stacked indices to the elements of each class
+    classes, num_samples = torch.unique(labels, return_counts=True)
+    min_per_class = min(num_samples)
+
+    return min_per_class
 
 
 def measure_eigenfeatures(exp, nets, dataset, train_set=False):
     # measure eigenfeatures
     print("measuring eigenfeatures...")
-    beta, eigvals, eigvecs, class_betas = [], [], [], []
+    logger.info(f'rank {dist.get_rank()} measuring eigenfeatures')
+    results = {'beta': [],
+               'eigvals': [],
+               'eigvecs': [],
+               'class_betas': []}
     for net in tqdm(nets):
+        logger.info(f'rank {dist.get_rank()} starting loop over nets')
         # get inputs to each layer from whole dataloader
-        inputs, labels = net._process_collect_activity(
+        inputs, labels = net.module._process_collect_activity(
             dataset,
             train_set=train_set,
             with_updates=False,
             use_training_mode=False,
         )
-        eigenfeatures = net.measure_eigenfeatures(inputs, with_updates=False)
-        beta_by_class = net.measure_class_eigenfeatures(inputs, labels, eigenfeatures[2], rms=False, with_updates=False)
-        beta.append(eigenfeatures[0])
-        eigvals.append(eigenfeatures[1])
-        eigvecs.append(eigenfeatures[2])
-        class_betas.append(beta_by_class)
+        
+        if dataset.distributed:
+            min_per_class = torch.tensor(min_samples_per_class(labels), device=dataset.device)
+            logger.info(f'{dist.get_rank()} sample limit = {min_per_class}')
+            dist.all_reduce(min_per_class, op=dist.ReduceOp.MIN)
+            # min_per_class = min_per_class.cpu()
+            logger.info(f'{dist.get_rank()} sample limit = {min_per_class}')
 
-    # make it a dictionary
-    class_names = getattr(dataset.train_loader if train_set else dataset.test_loader, "dataset").classes
-    return dict(
-        beta=beta,
-        eigvals=eigvals,
-        eigvecs=eigvecs,
-        class_betas=class_betas,
-        class_names=class_names,
-    )
+        logger.info(f'rank {dist.get_rank()} collected activity')
+        beta, eigvals, eigvecs = net.module.measure_eigenfeatures(inputs, with_updates=False)
+        logger.info(f'rank {dist.get_rank()} measured eigenfeatures')
+        beta_by_class = net.module.measure_class_eigenfeatures(
+            inputs, labels, eigvecs, rms=False, with_updates=False, num_samples_per_class=min_per_class
+        )
+        logger.info(f'rank {dist.get_rank()} measured class eigenfeatures')
+        results['beta'].append(beta)
+        results['eigvals'].append(eigvals)
+        results['eigvecs'].append(eigvecs)
+        results['class_betas'].append(beta_by_class)
+
+    if dataset.distributed:
+        logger.info(f'rank {dist.get_rank()} waiting on barrier')
+        dist.barrier()
+        for key, metric in results.items():
+            depth = get_nested_depth(metric)
+            agg_metric = replicate_dimension(construct_zeros_obj(metric, device=dataset.device),
+                                             target_dim=depth,
+                                             n_reps=dist.get_world_size())
+
+            logger.info(f'{key}\n{get_list_dims(agg_metric)}')
+            logger.info(f'rank {dist.get_rank()} pre gather for {key}')
+            gather_list_of_lists(metric, agg_metric, device=dataset.device, move_to_gpu=True)
+            logger.info(f'rank {dist.get_rank()} post gather for {key}')
+            # Consider: Transpose agg_metric to put process back on outer dimension for easy allocation.
+            # Currently: (nets, layer x proc)
+            results[key] = agg_metric
+
+    results['class_names'] = getattr(
+        dataset.train_loader if train_set else dataset.test_loader, "dataset"
+    ).classes
+
+    print(dist.get_rank(), results['class_names'])  # need to confirm always the same, even as dataset grows
+
+    return results
 
 
 def eigenvector_dropout(exp, nets, dataset, eigen_results, train_set=False):
@@ -203,4 +264,4 @@ def measure_alignment_distribution(nets, dataset, **parameters):
     # do training loop
     parameters = dict(
         train_set=True,
-    )
+   )

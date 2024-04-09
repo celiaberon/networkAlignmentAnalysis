@@ -1,8 +1,10 @@
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+from .. import plotting, processing
 from ..models.registry import get_model
 from . import arglib
-from .. import processing
-from .. import plotting
 from .experiment import Experiment
 
 
@@ -53,7 +55,14 @@ class AlignmentStatistics(Experiment):
         ]
         nets = [net.to(self.device) for net in nets]
 
-        optimizers = [optim(net.parameters(), lr=self.args.default_lr, weight_decay=self.args.default_wd) for net in nets]
+        # Wrap each net in DDP module if using distributed training.
+        if self.distributed:
+            nets = self.wrap_ddp(nets)
+
+        optimizers = [
+            optim(net.parameters(), lr=self.args.default_lr, weight_decay=self.args.default_wd)
+            for net in nets
+        ]
 
         prms = {
             "vals": [self.args.network],  # require iterable for identifying how many types of networks there are (just one type...)

@@ -1,5 +1,6 @@
 from matplotlib.pyplot import show
 from networkAlignmentAnalysis.experiments.registry import create_experiment
+import torch.distributed as dist
 
 if __name__ == "__main__":
 
@@ -20,8 +21,11 @@ if __name__ == "__main__":
         # Run main experiment method
         results, nets = exp.main()
 
+        if exp.distributed:
+            if dist.get_rank() != 0:
+                pass
         # Save results if requested
-        if not exp.args.nosave:
+        elif not exp.args.nosave:
             exp.save_experiment(results)
 
             # Save copy of repo

@@ -5,10 +5,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from natsort import natsorted
+from socket import gethostname
+import logging
 
 import torch
-import wandb
+import torch.distributed as dist
 from matplotlib import pyplot as plt
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+import wandb
 
 from .. import files
 from ..datasets import get_dataset
@@ -24,6 +29,11 @@ class Experiment(ABC):
         self.register_timestamp()  # Register timestamp of experiment
         self.run = self.configure_wandb()  # Create a wandb run object (or None depending on args.use_wandb)
         self.device = self.args.device
+        self.loader_parameters = {
+            'batch_size': self.args.batch_size
+        }
+        self.setup_ddp()  # Configure experiment for distributed training if appropriate
+        self.configure_logging()
 
     def report(self, init=False, args=False, meta_args=False) -> None:
         """Method for programmatically reporting details about experiment"""
@@ -73,9 +83,13 @@ class Experiment(ABC):
         """
         # Make full path to experiment directory
         exp_path = self.basepath / self.get_exp_path()
-
+        
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
+            if dist.get_rank()!=0:
+                return exp_path
+        
         # Make experiment directory if it doesn't yet exist
-        if create and not (exp_path.exists()):
+        if create and not exp_path.exists():
             exp_path.mkdir(parents=True)
 
         return exp_path
@@ -90,11 +104,17 @@ class Experiment(ABC):
         if self.args.use_timestamp:
             exp_path = exp_path / self.timestamp
 
+        if self.args.use_jobid:
+            exp_path = exp_path / os.environ["SLURM_JOB_ID"]
+
         return exp_path
 
     def get_path(self, name, create=True) -> Path:
         """Method for returning path to file"""
         # get experiment directory
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
+            if (dist.get_rank()==0):
+                create = False
         exp_path = self.get_dir(create=create)
 
         # return full path (including stem)
@@ -104,9 +124,10 @@ class Experiment(ABC):
         """create a wandb run file and set environment parameters appropriately"""
         if self.args.use_wandb:
             wandb.login()
+            
             run = wandb.init(
                 project=self.get_basename(),
-                name="",
+                name=os.environ.get("SLURM_JOB_ID", ""),
                 config=self.args,
             )
 
@@ -200,7 +221,18 @@ class Experiment(ABC):
             default=None,
             help="the timestamp of a previous experiment to plot or observe parameters",
         )
-
+        parser.add_argument(
+            "--use_jobid",
+            default=False,
+            action="store_true",
+            help="if used, will save data in a folder named after the current job",
+        )
+        parser.add_argument(
+            "--log",
+            default='info',
+            type=str,
+            help="set logging level",
+        )
         # parse arguments (passing directly because initial parser will remove the "--experiment" argument)
         self.args = parser.parse_args(args=args)
 
@@ -237,6 +269,21 @@ class Experiment(ABC):
         """Method for loading path to network checkpoint file"""
         return self.get_dir() / "checkpoint.tar"
 
+    def configure_logging(self):
+
+        levels = {'debug': logging.DEBUG, 'info': logging.INFO, 'warning': logging.WARNING, 'error': logging.ERROR, 'critical': logging.CRITICAL}
+        logging_level = levels.get(self.args.log, 'info')
+        filename = os.environ.get("SLURM_JOB_ID", 'local_run') + '.log'
+        logging.basicConfig(filename= files.homedir_path() / 'logs' / filename,
+                    format = '%(asctime)s:  %(levelname)-10s  %(name)-12s   %(message)s', 
+                    level=logging_level)
+        self.main_logger = logging.getLogger()
+
+        self.main_logger.info(f'MASTER_ADDR = {os.environ.get("MASTER_ADDR")}')
+        self.main_logger.info(f'MASTER_PORT = {os.environ.get("MASTER_PORT")}')
+        self.main_logger.info(f'SLURM_NTASKS = {os.environ.get("SLURM_NTASKS")}')
+        self.main_logger.info(f'SLURM_NGPUS = {os.environ.get("SLURM_GPUS_ON_NODE")}')
+    
     def _update_args(self, prms):
         """Method for updating arguments from saved parameter dictionary"""
         # First check if saved parameters contain unknown keys
@@ -347,15 +394,59 @@ class Experiment(ABC):
             self.args.dataset,
             build=True,
             transform_parameters=transform_parameters,
-            loader_parameters={"batch_size": self.args.batch_size},
-            device=self.args.device,
+            loader_parameters=self.loader_parameters,
+            device=self.device,
         )
+    
+    def setup_ddp(self, verbose=True):
 
-    def plot_ready(self, name):
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        self.distributed = world_size > 1
+        if not self.distributed:
+            if verbose: print('Not using distributed training')
+            return None
+        rank = int(os.environ["SLURM_PROCID"])  # absolute rank across all nodes * gpus_per_node
+        gpus_per_node = int(os.environ["SLURM_GPUS_ON_NODE"])
+        assert gpus_per_node == torch.cuda.device_count()
+
+        if verbose:
+            print(
+                f"Hello from rank {rank} of {world_size} on {gethostname()} where there are"
+                f" {gpus_per_node} allocated GPUs per node.",
+                flush=True,
+            )
+
+        # Update num_workers for dataloader if using distributed training.
+        self.loader_parameters['num_workers'] = int(os.environ["SLURM_CPUS_PER_TASK"])
+        self.loader_parameters['distributed'] = self.distributed
+
+        # Initialize the process group
+        dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+        if verbose and (rank == 0):
+            print(f"Group initialized? {dist.is_initialized()}", flush=True)
+
+        # Set a local rank as process id within node.
+        local_rank = rank - gpus_per_node * (rank // gpus_per_node)
+        self.device = local_rank
+        torch.cuda.set_device(local_rank)
+        if verbose:
+            print(f"host: {gethostname()}, rank: {rank}, local_rank: {local_rank}")
+
+    def wrap_ddp(self, nets):
+        return [DDP(net, device_ids=[self.device]) for net in nets]
+
+    def plot_ready(self, name, by_rank=False):
         """standard method for saving and showing plot when it's ready"""
         # if saving, then save the plot
         if not self.args.nosave:
-            plt.savefig(str(self.get_path(name)))
+            save_path = str(self.get_path(name))
+            if self.distributed and by_rank:
+                rank = dist.get_rank()
+                save_path = f'{save_path}_{rank}'
+                name = f'{name}_{rank}'
+                dist.barrier()
+            plt.savefig(save_path)
         if self.run is not None:
             self.run.log({name: wandb.Image(plt)})
         # show the plot now if not doing showall

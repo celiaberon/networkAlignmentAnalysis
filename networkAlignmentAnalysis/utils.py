@@ -1,16 +1,21 @@
-from warnings import warn
 import zipfile
 import os
-from typing import List
-from contextlib import contextmanager
-from functools import wraps
 import math
 from natsort import natsorted
+from contextlib import contextmanager
+from functools import wraps
+from typing import List
+from warnings import warn
+
 import numpy as np
+import torch
+import torch.distributed as dist
+from natsort import natsorted
 from scipy.linalg import null_space
 from sklearn.decomposition import IncrementalPCA
 import torch
 from gitignore_parser import parse_gitignore
+from torch import nn
 
 
 # -------------- context managers & decorators --------------
@@ -644,10 +649,18 @@ def load_checkpoints(nets, optimizers, device, path):
     TODO: device handling for passing between gpu/cpu
     """
 
+    prev_checkpoints = list(path.glob('checkpoint_*'))
+    latest_checkpoint = natsorted(prev_checkpoints)[-1] if prev_checkpoints else path / 'checkpoint.tar'
+    print(f'loading from latest checkpoint: {latest_checkpoint}')\
+
     if device == "cpu":
-        checkpoint = torch.load(path, map_location=device)
-    elif device == "cuda":
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(latest_checkpoint, map_location=device)
+    elif device == 'cuda':
+        checkpoint = torch.load(latest_checkpoint)
+    elif isinstance(device, int):
+        map_location = {'cuda:0': f'cuda:{device}'}
+        checkpoint = torch.load(latest_checkpoint, map_location=map_location)
+
 
     net_ids = natsorted([key for key in checkpoint if key.startswith("model_state_dict")])
     opt_ids = natsorted([key for key in checkpoint if key.startswith("optimizer_state_dict")])
@@ -703,3 +716,151 @@ def compress_directory(output_path, directory_path=None):
         # go through directory
         for file, name in zip(files_to_copy, archive_names):
             zipf.write(file, arcname=name)
+
+
+def get_alignment_dims(nets, dataset, num_epochs, use_train=True):
+
+    """
+    Calcute expected dimensions of alignment across a network after a full pass (training or
+    testing).
+    """
+
+    #TODO: generalize this better to include conv layers
+    dataloader = dataset.train_loader if use_train else dataset.test_loader
+
+    dims = []
+    for layer in nets[0].module.get_alignment_layers():
+        if type(layer) == nn.Linear:
+            dims.append((len(nets), len(dataloader) * num_epochs, layer.out_features))
+        elif type(layer) == nn.Conv2d:
+            dims.append((len(nets), len(dataloader) * num_epochs, layer.out_channels))
+
+    return dims
+
+
+def get_list_dims(list_of_lists, preserve_arrays=True):
+    """
+    Determine the dimensions of a nested list of arbitrary depth. Returns a tuple representing the
+    dimensions of the nested list
+    """
+    
+    if isinstance(list_of_lists, torch.Tensor) or isinstance(list_of_lists, np.ndarray):
+        # Convert array shape to a tuple and return.
+        if preserve_arrays:
+            return (list_of_lists.shape,)
+        else:
+            return list_of_lists.shape
+    elif isinstance(list_of_lists, list):
+        # If it's a list, process each item.
+        dims = []
+        for item in list_of_lists:
+            item_dims = get_list_dims(item)
+            if item_dims:
+                dims.append(item_dims)  # only add item dims if they provide additional info
+        return (len(list_of_lists),) + tuple(dims)
+    else:
+        # Base case: reached an item that is neither a list nor an array.
+        return ()
+    
+
+def get_nested_depth(list_of_lists, current_depth=0, target_type=torch.Tensor):
+
+    """
+    Find depth of nested structure up to target_type of array (either torch.Tensor or np.ndarray).
+    """
+    assert(target_type != list)  # cannot work for type list
+    if isinstance(list_of_lists, target_type):
+        return current_depth
+    elif isinstance(list_of_lists, list):
+        for item in list_of_lists:
+            depth = get_nested_depth(item, current_depth+1)
+        if depth != -1:
+            return depth
+        
+    return -1  # no target_type found
+
+
+def construct_zeros_obj(list_of_lists, device='cpu', show_dims=False):
+    """
+    Construct an object of zeros that matches the dimensions of the given nested list or array.
+    Returns a new object with the same structure as the input, filled with zeros.
+    """
+
+    if show_dims:
+        print(get_list_dims(list_of_lists))
+    if isinstance(list_of_lists, np.ndarray):
+        # For numpy arrays, create a zeros array with the same shape.
+        return np.zeros(list_of_lists.shape, dtype=list_of_lists.dtype)
+    elif isinstance(list_of_lists, torch.Tensor):
+        # Same for tensors.
+        return torch.zeros(list_of_lists.shape, dtype=list_of_lists.dtype, device=device)
+    elif isinstance(list_of_lists, list):
+        # For lists, recursively build a list structure.
+        return [construct_zeros_obj(item, device=device) for item in list_of_lists]
+    else:
+        # Base case: reached a scalar value, replace it with 0.
+        return 0
+
+
+def replicate_dimension(input, target_dim, n_reps, current_dim=0):
+    """
+    Introduce N replicates of a particular dimension in the given structure.
+    """
+    if current_dim == target_dim:
+        return [input for _ in range(n_reps)]
+    else:
+        return [replicate_dimension(item, target_dim, n_reps, current_dim + 1) for item in input]
+
+
+def gather_by_layer(local_metric, grp_metric):
+
+    """
+    Gather metrics calculated from distributed processes onto main process.
+    local_metric should be a list of tensors, which will be identically sized across processes.
+    grp_metric starts as a list of tensors (of zeros) of size [local_metric] * n_processes.
+
+    dist.gather() returns filled grp_metric on main process (rank 0).
+    Example: for alignment, each process sends local_metric with alignment as:
+         [nnets, nsteps, outfeatures] x layer
+    grp_metric ends up with:
+         [[nnets, nsteps, outfeatures] x process] x layer
+         (later becomes: [nnets, nsteps x n_processes, outfeatures] x layer)
+    """
+    # Gather data tensors onto all processes.
+    [dist.all_gather(g_, l_) for l_, g_ in zip(local_metric, grp_metric)]
+
+
+def gather_list_of_lists(local_metric, grp_metric, device=None, move_to_gpu=False):
+
+    if isinstance(local_metric, torch.Tensor):
+        if move_to_gpu:
+            local_metric = local_metric.to(device)
+        dist.all_gather(grp_metric, local_metric)
+
+    elif isinstance(local_metric, list):
+        for l_, g_ in zip(local_metric, grp_metric):
+            gather_list_of_lists(l_, g_, device=device, move_to_gpu=move_to_gpu)
+        
+
+def gather_metrics(local_metric, grp_metric):
+    """
+    Standard gather process that assumes outermost level of list is a sublist or array from each
+    process in world_size.
+    """
+    # Gather data tensors onto on all processes.
+    dist.all_gather(grp_metric, local_metric)
+
+
+def permute_distributed_metric(grp_metric):
+
+    """
+    Placeholder for function to permute grp_metric along cat_dim using world size to maintain
+    correct order of metric according to effective minibatches across processes. 
+    """
+
+    n_processes = dist.get_world_size()
+    n_steps = grp_metric.shape[1]
+    perm_interval = n_steps // n_processes
+    split_array = [grp_metric[:, i::perm_interval, :] for i in range(perm_interval)]
+    permuted_metric = torch.cat(split_array, dim=1)
+    return permuted_metric

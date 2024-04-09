@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 import torch
 import torchvision
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torchvision.transforms import v2 as transforms
 
@@ -14,12 +15,13 @@ REQUIRED_PROPERTIES = ["dataset_path", "dataset_constructor", "loss_function"]
 
 
 def default_loader_parameters(
-    distributed,
+    distributed=False,
     batch_size=1024,
     num_workers=2,
     shuffle=True,
     pin_memory=True,
     persistent_workers=True,
+    drop_last=True,
 ):
     """
     contains the default dataloader parameters with the option of updating them
@@ -31,6 +33,7 @@ def default_loader_parameters(
         shuffle=False if distributed else shuffle,  # can't use shuffle=True if using DDP
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,
+        drop_last=True
     )
     return default_parameters
 
@@ -39,7 +42,6 @@ class DataSet(ABC):
     def __init__(
         self,
         device=None,
-        distributed=False,
         dataset_parameters={},
         transform_parameters={},
         loader_parameters={},
@@ -49,8 +51,10 @@ class DataSet(ABC):
         self.check_properties()
 
         # define device for dataloading
-        self.device = device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
-        self.distributed = distributed
+        self.device = (
+            device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.distributed = loader_parameters.get('distributed', False)
 
         # define extra transform (should be a callable method or None) for any transformations that
         # can't go in the torchvision.transforms.Compose(...), hopefully this won't be needed later
@@ -62,7 +66,9 @@ class DataSet(ABC):
         self.make_transform(**transform_parameters)
 
         # define the dataloader parameters
-        self.dataloader_parameters = default_loader_parameters(distributed, **loader_parameters)  # get dataloader parameters
+        self.dataloader_parameters = default_loader_parameters(
+            **loader_parameters
+        )  # get dataloader parameters
 
         # load the dataset and create the dataloaders
         self.dataset_parameters = dataset_parameters
@@ -288,9 +294,9 @@ def get_dataset(
         raise ValueError(f"Dataset ({dataset_name}) is not in DATASET_REGISTRY")
     dataset = DATASET_REGISTRY[dataset_name]
     if build:
-        if isinstance(transform_parameters, AlignmentNetwork):
+        if isinstance(transform_parameters, AlignmentNetwork) or isinstance(transform_parameters, DDP):
             # Can use an AlignmentNetwork instance to automatically retrieve transform parameters
-            transform_parameters = transform_parameters.get_transform_parameters(dataset_name)
+            transform_parameters = transform_parameters.module.get_transform_parameters(dataset_name)
         else:
             if not isinstance(transform_parameters, dict):
                 raise TypeError("transform_parameters must be a dictionary or an AlignmentNetwork")
