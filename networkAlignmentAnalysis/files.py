@@ -8,6 +8,7 @@ PATH_REGISTRY = {
     "cberon": Path("/n/home00/cberon/alignment/"),
     "corwin": Path("/Users/corwin/Building"),
     "atlandau": Path("/n/home05/atlandau/machine_learning"),
+    "landauland": Path("/Users/landauland/Documents/ML-Datasets"),
 }
 
 

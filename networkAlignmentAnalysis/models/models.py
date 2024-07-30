@@ -12,17 +12,23 @@ class MLP(AlignmentNetwork):
     includes optional kwargs for changing the hidden layer widths and the input dimensionality
     """
 
-    def initialize(self, input_dim=784, hidden_widths=[100, 100, 50], output_dim=10, dropout=0.5):
+    def initialize(self, input_dim=784, hidden_widths=[100, 100, 50], output_dim=10, dropout=0.5, linear=False):
         """architecture definition"""
 
+        # Define activation function (ReLU is default, but network can be "LINEAR" if requested)
+        if linear:
+            activation = nn.Identity()
+        else:
+            activation = nn.ReLU()
+
         # Input layer is always Linear then ReLU
-        layerInput = nn.Sequential(nn.Linear(input_dim, hidden_widths[0]), nn.ReLU())
+        layerInput = nn.Sequential(nn.Linear(input_dim, hidden_widths[0]), activation)
 
         # Hidden layers are dropout / Linear / ReLU
         layerHidden = []
         for ii in range(len(hidden_widths) - 1):
             hwin, hwout = hidden_widths[ii], hidden_widths[ii + 1]
-            layerHidden.append(nn.Sequential(nn.Dropout(p=dropout), nn.Linear(hwin, hwout), nn.ReLU()))
+            layerHidden.append(nn.Sequential(nn.Dropout(p=dropout), nn.Linear(hwin, hwout), activation))
 
         # Output layer is alwyays Dropout then Linear
         layerOutput = nn.Sequential(nn.Dropout(p=dropout), nn.Linear(hidden_widths[-1], output_dim))
@@ -247,7 +253,9 @@ class AlexNet(AlignmentNetwork):
                 "flatten": False,
                 "resize": (256, 256),
                 # 'out_channel': 3, # will replace extra-transform with this when torchvision is ready
-                "extra_transform": gray_to_rgb,
+                "extra_transform": [
+                    gray_to_rgb,
+                ],
             },
             "CIFAR10": {
                 "flatten": False,

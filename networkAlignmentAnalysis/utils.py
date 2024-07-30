@@ -4,6 +4,7 @@ import os
 from typing import List
 from contextlib import contextmanager
 from functools import wraps
+import math
 from natsort import natsorted
 import numpy as np
 from scipy.linalg import null_space
@@ -120,6 +121,19 @@ def get_eval_transform_by_cutoff(cutoff):
         return 1.0 * (evals > cutoff)
 
     return eval_transform
+
+
+def fractional_histogram(*args, **kwargs):
+    """wrapper of np.histogram() with relative counts instead of total or density"""
+    counts, bins = np.histogram(*args, **kwargs)
+    counts = counts / np.sum(counts)
+    return counts, bins
+
+
+def edge2center(edges):
+    """from a list of edges of bins (e.g. for torch.histogram()), return the centers between the edges"""
+    assert edges.ndim == 1, "edges must be a 1-d array"
+    return edges[:-1] + np.diff(edges) / 2
 
 
 def smartcorr(input):
@@ -310,7 +324,7 @@ def fast_rank(input):
 
 
 # ------------------ alignment functions ----------------------
-def alignment(input, weight, method="alignment"):
+def alignment(input, weight, method="alignment", relative=True):
     """
     measure alignment (proportion variance explained) between **input** and **weight**
 
@@ -330,6 +344,8 @@ def alignment(input, weight, method="alignment"):
             - which method to use to measure structure in **input**
             - if 'alignment', uses covariance matrix of **input**
             - if 'similarity', uses correlation matrix of **input**
+        relative: bool, default=True,
+            - if True, will measure relative RQ (divide by sum of eigenvalues)
 
     returns
     -------
@@ -345,8 +361,43 @@ def alignment(input, weight, method="alignment"):
         raise ValueError(f"did not recognize method ({method}), must be 'alignment' or 'similarity'")
     # Compute rayleigh quotient
     rq = torch.sum(torch.matmul(weight, cc) * weight, axis=1) / torch.sum(weight * weight, axis=1)
-    # proportion of variance explained by a projection of the input onto each weight
-    return rq / torch.trace(cc)
+    if relative:
+        # proportion of variance explained by a projection of the input onto each weight
+        return rq / torch.trace(cc)
+    # variance explained by a projection of the input onto each weight
+    return rq
+
+
+@torch.no_grad()
+def expected_alignment_distribution(eigenvalues, relative=True, valid_rotation=True, with_rotation=True, bins=11, num_tests=100):
+    """
+    for a set of eigenvalues, measure the expected distribution given aligned weights
+
+    relative determines whether to normalize by sum of eigenvalues
+    valid_rotation determines whether we create orthonormal rotation matrices (for True)
+    or just normally distributed weights with the expected variance (for False)
+    bins works like histogram bins
+    num_tests determines how many tests to do (it's actually num_tests*len(eigenvalues))
+    """
+    # otherwise, randomly sample using eigenvalue as weighted average
+    N = len(eigenvalues)
+    if relative:
+        eigenvalues /= eigenvalues.sum()
+    eigenvalues = eigenvalues.view(-1, 1).expand(-1, N * num_tests)
+    if with_rotation:
+        if valid_rotation:
+            mixing = [torch.linalg.qr(torch.normal(0, 1 / math.sqrt(N), (N, N)))[0].T for _ in range(num_tests)]
+            coefficients = torch.concatenate(mixing, axis=1) ** 2
+        else:
+            coefficients = torch.normal(0, 1 / math.sqrt(N), (N, N * num_tests)) ** 2
+    else:
+        coefficients = torch.ones((N, N * num_tests))
+    coefficients = coefficients.to(get_device(eigenvalues))
+    weights = eigenvalues * coefficients
+    alignment = torch.sum(eigenvalues * weights, dim=0) / weights.sum(dim=0)
+    counts, bins = torch.histogram(alignment.cpu(), bins=bins, density=True)
+    centers = edge2center(bins)
+    return counts, bins, centers
 
 
 def get_maximum_strides(h_input, w_input, layer):
@@ -357,6 +408,40 @@ def get_maximum_strides(h_input, w_input, layer):
 
 def get_unfold_params(layer):
     return dict(stride=layer.stride, padding=layer.padding, dilation=layer.dilation)
+
+
+# ----- cvPCA methods -----
+@torch.no_grad()
+def cvPCA(X1, X2):
+    """X1, X2 are both (dimensions x samples)"""
+    D, B = X1.shape
+    assert X2.shape == (D, B), "shape of X1 and X2 is not the same"
+    _, u = smart_pca(X1)
+
+    cproj0 = X1.T @ u
+    cproj1 = X2.T @ u
+    ss = (cproj0 * cproj1).mean(axis=0)
+    return ss
+
+
+def get_num_components(nc, shape):
+    return nc if nc is not None else min(shape)
+
+
+@torch.no_grad()
+def shuff_cvPCA(X1, X2, nshuff=5, cvmethod=cvPCA):
+    """X1, X2 are both (dimensions x samples)"""
+    D, B = X1.shape
+    assert X2.shape == (D, B), "shape of X1 and X2 is not the same"
+    nc = get_num_components(None, (D, B))
+    ss = torch.zeros((nshuff, nc))
+    X = torch.stack((X1, X2))
+    for k in range(nshuff):
+        iflip = 1 * (torch.rand(B) > 0.5)
+        X1c = torch.gather(X, 0, iflip.view(1, 1, -1).expand(1, D, -1)).squeeze(0)
+        X2c = torch.gather(X, 0, -(iflip - 1).view(1, 1, -1).expand(1, D, -1)).squeeze(0)
+        ss[k] = cvmethod(X1c, X2c)
+    return ss
 
 
 def avg_value_by_layer(full):
@@ -421,14 +506,18 @@ def transpose_list(list_of_lists):
     return list(map(list, zip(*list_of_lists)))
 
 
-def named_transpose(list_of_lists):
+def named_transpose(list_of_lists, reduction=None):
     """
     helper function for transposing lists without forcing the output to be a list like transpose_list
 
     for example, if list_of_lists contains 10 copies of lists that each have 3 iterable elements you
     want to name "A", "B", and "C", then write:
     A, B, C = named_transpose(list_of_lists)
+
+    if reduction is used, it will be applied to each output, otherwise will make them lists
     """
+    if reduction is not None:
+        return map(reduction, zip(*list_of_lists))
     return map(list, zip(*list_of_lists))
 
 

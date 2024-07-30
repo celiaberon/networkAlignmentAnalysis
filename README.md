@@ -57,7 +57,7 @@ set by ``dataset_path()`` (found in ``files.py``) for full compatibility.
 
 ## Usage and Tutorial
 Detailed usage and tutorials can be found in a dedicated markdown file 
-[here](media/usage.md).
+[here](docs/usage.md).
 
 ## Contributing
 Feel free to contribute to this project by opening issues or submitting pull
