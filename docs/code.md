@@ -132,6 +132,11 @@ Lastly, we have coded a one-size-fits-all training loop. It's a bit busy, becuas
   - There is wandb code here
   - Checkpointing code is at the end of the train loop
 
+### Possible improvement
+I don't think the ``**parameters`` system for determining how to run the training loop is very good, it depends heavily on the user knowing the possible parameters, it is hard coded and can yield failures, and is opaque in the sense that you have to look through the whole ``train.train`` function to see what the possible parameters are. 
+
+One possible method for improvement is to use a configuration management system. I haven't used one before, but I understand that good systems exist that are designed for machine learning experiments (like [Hydra](https://hydra.cc/docs/intro/)). 
+
 
 
 
