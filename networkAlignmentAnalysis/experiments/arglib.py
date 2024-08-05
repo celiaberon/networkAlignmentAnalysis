@@ -41,9 +41,10 @@ def add_alignment_analysis_parameters(parser):
         help="if used, will measure delta-weights during training",
     )
     parser.add_argument(
-        "--frequency",
+        "--measure_frequency",
         default=1,
         type=int,
+        action='store',
         help="how frequently to measure alignment etc. (how many minibatches)",
     )
     return parser
@@ -75,7 +76,7 @@ def add_checkpointing(parser):
         help="if used, saves each checkpoint as unique file (usually by epoch)",
     )
     parser.add_argument(
-        "--freq_ckpts",
+        "--rate_ckpts",
         default=1,
         type=int,
         help="how frequently to save checkpoints (in epochs)",
@@ -106,4 +107,16 @@ def add_dropout_experiment_details(parser):
         action="store_true",
         help="whether to do progressive dropout by layer or across all layers",
     )
+    return parser
+
+
+def add_early_stopping_parameters(parser):
+    
+    parser.add_argument(
+        "--max_change",
+        default=0,
+        type=float,
+        help="",
+    )
+
     return parser

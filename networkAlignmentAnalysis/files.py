@@ -13,6 +13,7 @@ PATH_REGISTRY = {
 
 HOMEDIR_REGISTRY = {
     "cberon": Path("/n/home00/cberon/"),
+    "Celia": Path("/Users/celiaberon/Documents/machine_learning"),
 }
 
 
@@ -27,7 +28,12 @@ def get_hostname():
 
 
 def get_username():
-    return getpass.getuser()
+
+    username = getpass.getuser()
+    if username.lower().startswith("celia"):
+        username = "Celia"
+
+    return username
 
 
 def local_path():

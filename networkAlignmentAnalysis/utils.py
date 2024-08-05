@@ -1,7 +1,6 @@
-import zipfile
-import os
 import math
-from natsort import natsorted
+import os
+import zipfile
 from contextlib import contextmanager
 from functools import wraps
 from typing import List
@@ -10,11 +9,10 @@ from warnings import warn
 import numpy as np
 import torch
 import torch.distributed as dist
+from gitignore_parser import parse_gitignore
 from natsort import natsorted
 from scipy.linalg import null_space
 from sklearn.decomposition import IncrementalPCA
-import torch
-from gitignore_parser import parse_gitignore
 from torch import nn
 
 
@@ -864,3 +862,23 @@ def permute_distributed_metric(grp_metric):
     split_array = [grp_metric[:, i::perm_interval, :] for i in range(perm_interval)]
     permuted_metric = torch.cat(split_array, dim=1)
     return permuted_metric
+
+
+def smooth_trace(metric, window=5):
+
+    return [torch.mean(metric[i:i+window]) for i in range(len(metric[:-window]))]
+
+def percent_change(x1, x2):
+
+    return (x2 - x1) / x1
+    
+
+def rolling_percent_change(metric, window):
+
+    smoothed = smooth_trace(metric, window)
+    pct_changes = [percent_change(x1, x2) for x1, x2 in zip(smoothed[:-1], smoothed[1:])]
+    return torch.asarray(pct_changes)
+
+def is_plateau(metric, threshold=0.01, p_samples=0.7):
+    print(torch.mean(torch.asarray(metric < threshold, dtype=torch.float)))
+    return torch.mean(torch.asarray(metric < threshold, dtype=torch.float)) > p_samples

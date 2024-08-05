@@ -234,7 +234,7 @@ class Experiment(ABC):
             help="set logging level",
         )
         # parse arguments (passing directly because initial parser will remove the "--experiment" argument)
-        self.args = parser.parse_args(args=args)
+        self.args, _ = parser.parse_known_args(args=args)
 
         # manage device
         if self.args.device is None:

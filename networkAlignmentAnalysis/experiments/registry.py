@@ -1,12 +1,15 @@
 from argparse import ArgumentParser
-from .alignment_stats import AlignmentStatistics
-from .alignment_comparison import AlignmentComparison
+
 from .adversarial_shaping import AdversarialShaping
+from .alignment_comparison import AlignmentComparison
+from .alignment_early_stopping import AlignmentEarlyStopping
+from .alignment_stats import AlignmentStatistics
 
 EXPERIMENT_REGISTRY = {
     "alignment_stats": AlignmentStatistics,
     "alignment_comparison": AlignmentComparison,
     "adversarial_shaping": AdversarialShaping,
+    "early_stopping": AlignmentEarlyStopping
 }
 
 
