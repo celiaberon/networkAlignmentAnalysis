@@ -1,3 +1,4 @@
+import logging
 import time
 from copy import copy, deepcopy
 from pathlib import Path
@@ -6,13 +7,19 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from networkAlignmentAnalysis.utils import (condense_values, gather_by_layer,
+from networkAlignmentAnalysis.utils import (compute_stats_by_type,
+                                            condense_values,
+                                            expected_alignment_distribution,
+                                            gather_by_layer,
                                             get_alignment_dims, get_list_dims,
+                                            is_plateau,
                                             permute_distributed_metric,
-                                            save_checkpoint, test_nets,
-                                            train_nets, transpose_list,
-			     		    smart_pca,
-   					    expected_alignment_distribution)
+                                            rolling_percent_change,
+                                            save_checkpoint, smart_pca,
+                                            test_nets, train_nets,
+                                            transpose_list)
+
+logger = logging.getLogger(__name__)
 
 @train_nets
 def train(nets, optimizers, dataset, **parameters):
@@ -121,7 +128,7 @@ def train(nets, optimizers, dataset, **parameters):
 
     for epoch in epoch_loop:
 
-	if dataset.distributed:
+        if dataset.distributed:
             if use_train:
                 dataset.train_sampler.set_epoch(epoch)
             else:
@@ -173,8 +180,8 @@ def train(nets, optimizers, dataset, **parameters):
             if idx % measure_frequency == 0:
                 if measure_alignment:
                     # Measure alignment if requested
-	            alignment = [net.module.measure_alignment(images, precomputed=True, method="alignment")
-                            for net in nets]
+                    alignment = [net.module.measure_alignment(images, precomputed=True, method="alignment")
+                                for net in nets]
 
                     if not dataset.distributed:
                         results["alignment"].append(alignment)
@@ -280,6 +287,216 @@ def train(nets, optimizers, dataset, **parameters):
         # Concatenate along step axis for each layer?
         results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
         print('post', get_list_dims(results["alignment"]))
+        dist.barrier()
+
+    return results
+
+
+@train_nets
+def train_to_plateau(nets, optimizers, dataset, **parameters):
+    """method for training network on supervised learning problem"""
+
+    # input argument checks
+    if not (isinstance(nets, list)):
+        nets = [nets]
+    if not (isinstance(optimizers, list)):
+        optimizers = [optimizers]
+    assert len(nets) == len(optimizers), "nets and optimizers need to be equal length lists"
+
+    # check if we should print progress bars
+    verbose = parameters.get("verbose", True)
+
+    # preallocate variables and define metaparameters
+    num_nets = len(nets)
+    use_train = parameters.get("train_set", True)
+    dataloader = dataset.train_loader if use_train else dataset.test_loader
+    num_steps = len(dataset.train_loader) * parameters["num_epochs"]
+
+    # --- optional W&B logging ---
+    run = parameters.get("run")
+
+    # --- optional analyses ---
+    measure_alignment = parameters.get("alignment", True)
+    measure_delta_weights = parameters.get("delta_weights", False)
+    measure_frequency = parameters.get("frequency", 1)
+
+    # --- create results dictionary if not provided and handle checkpoint info ---
+    results = parameters.get("results", False)
+    num_complete = parameters.get("num_complete", 0)
+    save_ckpt = parameters.get("save_ckpt", False)
+    freq_ckpt = parameters.get("freq_ckpt", 1)
+    path_ckpt, unique_ckpt = parameters.get("path_ckpt", ("", True))
+    
+    # Store metrics on GPU if using DDP, otherwise store on cpu.
+    internal_device = dataset.device if dataset.distributed else 'cpu'
+    
+    if not results:
+        # initialize dictionary for storing performance across epochs
+        results = {
+            "loss": torch.zeros((num_steps, num_nets), device=internal_device),
+            "accuracy": torch.zeros((num_steps, num_nets), device=internal_device),
+        }
+
+        # measure alignment throughout training
+        if measure_alignment:
+            results["alignment"] = []
+            if dataset.distributed:
+                alignment_dims = get_alignment_dims(nets, dataset,
+                                    num_epochs=1,  # can set to num epochs if don't want to agg every epoch
+                                    use_train=use_train)
+                full_alignment = [[torch.zeros(layer_dims, dtype=torch.float, device=dataset.device)
+                                  for _ in range(dist.get_world_size())]
+                                  for layer_dims in alignment_dims]
+                alignment_reference = [[torch.clone(proc) for proc in layer_dims] for layer_dims in full_alignment]
+                print(f'full alignment dims should be {dist.get_world_size()} x {alignment_dims}')
+
+        # measure weight norm throughout training
+        if measure_delta_weights:
+            results["delta_weights"] = []
+            results["init_weights"] = [net.module.get_alignment_weights() for net in nets]
+
+    # If loaded from checkpoint but running more epochs than initialized for.
+    elif results["loss"].shape[0] < num_steps:
+        add_steps = num_steps - results["loss"].shape[0]
+        assert (add_steps / (parameters["num_epochs"] - num_complete)) == len(
+            dataset.train_loader
+        ), "Number of new steps needs to multiple of epochs and num minibatches"
+        results["loss"] = torch.vstack((results["loss"], torch.zeros((add_steps, num_nets))))
+        results["accuracy"] = torch.vstack((results["accuracy"], torch.zeros((add_steps, num_nets))))
+
+    if num_complete > 0:
+        print("resuming training from checkpoint on epoch", num_complete)
+
+    # --- training loop ---
+    epoch_loop = range(num_complete, parameters["num_epochs"])
+    if verbose:
+        epoch_loop = tqdm(epoch_loop, desc="training epoch")
+
+    for epoch in epoch_loop:
+
+        epoch_alignment=[]  # will serve as local for distributed training
+        if dataset.distributed:
+            if use_train:
+                dataset.train_sampler.set_epoch(epoch)
+            else:
+                dataset.test_sampler.set_epoch(epoch)
+
+            # Reset local and group metrics every epoch.
+            full_alignment = [[torch.clone(proc) for proc in layer_dims] for layer_dims in alignment_reference]
+
+        # Create batch loop with optional progress updates
+        batch_loop = dataloader
+        if verbose:
+            batch_loop = tqdm(batch_loop, desc="minibatch", leave=False)
+
+        for idx, batch in enumerate(batch_loop):
+
+            cidx = epoch * len(dataloader) + idx
+            images, labels = dataset.unwrap_batch(batch, device=dataset.device)
+
+            # Zero the gradients
+            for opt in optimizers:
+                opt.zero_grad()
+
+            # Perform forward pass
+            outputs = [net(images, store_hidden=True) for net in nets]
+
+            # Perform backward pass & optimization
+            loss = [dataset.measure_loss(output, labels) for output in outputs]
+            for l, opt in zip(loss, optimizers):
+                l.backward()
+                opt.step()
+
+            results["loss"][cidx] = torch.tensor([l.item() for l in loss], device=internal_device)
+            results["accuracy"][cidx] = torch.tensor(
+                [dataset.measure_accuracy(output, labels) for output in outputs], device=internal_device
+            )
+
+            if dataset.distributed:
+                if dataset.loss_function.reduction == 'mean':
+                    dist.all_reduce(results["loss"][cidx], op=dist.ReduceOp.AVG)
+                    dist.all_reduce(results["loss"][cidx], op=dist.ReduceOp.AVG)
+                else:
+                    raise NotImplementedError
+                
+            if idx % measure_frequency == 0:
+                if measure_alignment:
+                    # Measure alignment if requested
+                    alignment = [net.module.measure_alignment(images, precomputed=True, method="alignment")
+                                for net in nets]
+                    
+                    if not dataset.distributed:
+                        results['alignment'].append(alignment)
+                    epoch_alignment.append(alignment)
+
+                if measure_delta_weights:
+                    c_delta_weights = [net.compare_weights(init_weight) for net, init_weight in zip(nets, results["init_weights"])]
+                    if measure_delta_weights:
+                        # Save change in weights if requested
+                        results["delta_weights"].append(c_delta_weights)
+
+            # Log run with WandB, but only from main process if using distributed training.
+            if (run is not None) and ((not dataset.distributed) or dist.get_rank() == 0):
+                run.log(
+                    {f"losses/loss-{ii}": l.item() for ii, l in enumerate(loss)}
+                    | {f"accuracies/accuracy-{ii}": dataset.measure_accuracy(output, labels) for ii, output in enumerate(outputs)}
+                    | {"batch": cidx}
+                )
+
+        # Transpose first dim from steps to layers.
+        epoch_alignment = condense_values(transpose_list(epoch_alignment))
+        if dataset.distributed:
+            epoch_alignment = [layer.to(dataset.device) for layer in epoch_alignment]
+            gather_by_layer(epoch_alignment, full_alignment)
+            full_alignment = [permute_distributed_metric(torch.cat(layer, dim=1).cpu()) for layer in full_alignment]
+            results['alignment'].append(full_alignment)
+            dist.barrier()
+        # else:
+        #     results['alignment'].append(epoch_alignment)
+
+        # Calculate percent change of alignment for each layer within last epoch.
+        # TODO: decide how to handle measurement replicates (across nets and across processes).
+        epoch_alignment =  torch.stack([torch.mean(align, dim=2) for align in epoch_alignment])
+        align_mean = compute_stats_by_type(epoch_alignment, num_types=1, dim=1, method="se")[0].squeeze(1)
+        plateau_reached = []
+        for layer in range(align_mean.shape[0]):
+            pct_changes = rolling_percent_change(align_mean[layer, :], window=5)
+            plateau_reached.append(is_plateau(pct_changes, threshold=parameters.get('max_change')))
+        logger.info(f'epoch {epoch} pleateaus: {plateau_reached}')
+
+
+        if save_ckpt and ((epoch % freq_ckpt == 0) or (epoch == (parameters["num_epochs"] - 1))):
+            if (not dataset.distributed) or (dist.get_rank() == 0):
+                if unique_ckpt:
+                    prefix, suffix = str(path_ckpt).split('.')
+                    prefix = prefix.split('checkpoint')[0]  # for subsequent epoch checkpoints
+                    path_ckpt = Path(f'{prefix}checkpoint_{epoch}.{suffix}')
+                save_checkpoint(
+                    nets,
+                    optimizers,
+                    results | {"prms": parameters, "epoch": epoch, "device": dataset.device},
+                    path_ckpt,
+                )
+            if dataset.distributed:
+                dist.barrier()
+        
+        if all(plateau_reached):
+            print(f'exiting training loop after epoch {epoch}')
+            break
+
+    # condense optional analyses
+    for k in ["delta_weights", 'alignment', "avgcorr", "fullcorr"]:
+        if k not in results.keys():
+            continue
+        if (k == 'alignment') and dataset.distributed:
+            continue
+        results[k] = condense_values(transpose_list(results[k]))
+
+    if measure_alignment and dataset.distributed:
+        results["loss"] = results["loss"].cpu()
+        results["accuracy"] = results["accuracy"].cpu()
+        # Concatenate along step axis for each layer?
+        results['alignment'] = [torch.cat(ilayer, axis=1) for ilayer in zip(*results['alignment'])]
         dist.barrier()
 
     return results
