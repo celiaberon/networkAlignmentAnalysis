@@ -13,11 +13,11 @@ After networks have been created within a specific experiment, they get wrapped 
 
 ## Train loop
 The main portion of implementation of course involves the training loop. The current approach aims to sync up measurements for each batch, most (perhaps all) of which is not truly necessary and was only motivated by preserving existing non-parallelized workflow and analysis (followed up below for potential simpler approach).
-    - Loss and accuracy are just calculated in aggregate across all processes (averaged across sub-batches) with `all_reduce()` (this is all standard/easily implemented).
-    - Alignment is a bit different because it's not a metric that can just be averaged across processes (one option is that it could be, but that will change the way we're thinking about the metric slightly). Instead, we use `all_gather` to combine each process's alignment measurements into a list on the main process, so that there are `world_size` replicates of alignment metrics per step. These become somewhat deep nested lists, such that there are `world_size` times the original alignment measurement, comprised of:
+- Loss and accuracy are just calculated in aggregate across all processes (averaged across sub-batches) with `all_reduce()` (this is all standard/easily implemented).
+- Alignment is a bit different because it's not a metric that can just be averaged across processes (one option is that it could be, but that will change the way we're thinking about the metric slightly). Instead, we use `all_gather` to combine each process's alignment measurements into a list on the main process, so that there are `world_size` replicates of alignment metrics per step. These become somewhat deep nested lists, such that there are `world_size` times the original alignment measurement, comprised of:
         ```[(num_nets, num_steps, num_neurons) for layer in alignment_layers]```
-        - After gathering on the main process, alignment measurements are permuted such that replicate from different processes are grouped.
-    - Delta weights does not need aggregation because each process contains the same model/weight update.
+    - After gathering on the main process, alignment measurements are permuted such that replicate from different processes are grouped.
+- Delta weights does not need aggregation because each process contains the same model/weight update.
 
 Using aggregations that send values to all processes rather than just main process (`all_reduce` and `all_gather`) to ensure function returns throughout experiment match across all processes.
 
